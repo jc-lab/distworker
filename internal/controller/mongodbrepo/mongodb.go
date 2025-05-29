@@ -1,0 +1,205 @@
+package mongodbrepo
+
+import (
+	"context"
+	"fmt"
+	database2 "github.com/jc-lab/distworker/pkg/controller/database"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+)
+
+// MongoDB represents the MongoDB database connection
+type MongoDB struct {
+	client            *mongo.Client
+	database          *mongo.Database
+	taskRepo          *TaskRepository
+	queueRepo         *QueueRepository
+	workerSessionRepo *WorkerSessionRepository
+}
+
+// NewDB creates a new MongoDB connection
+func NewDB(config *MongoDBConfig) (*MongoDB, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Set client options
+	clientOptions := options.Client().ApplyURI(config.URI)
+
+	// Connect to MongoDB
+	client, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	// Ping the database
+	if err := client.Ping(ctx, nil); err != nil {
+		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+
+	db := &MongoDB{
+		client:   client,
+		database: client.Database(config.Database),
+	}
+
+	// Create repositories
+	db.taskRepo = NewTaskRepository(db)
+	db.queueRepo = NewQueueRepository(db)
+	db.workerSessionRepo = NewWorkerSessionRepository(db)
+
+	// Create indexes
+	if err := db.createIndexes(ctx); err != nil {
+		return nil, fmt.Errorf("failed to create indexes: %w", err)
+	}
+
+	return db, nil
+}
+
+// Close closes the MongoDB connection
+func (m *MongoDB) Close(ctx context.Context) error {
+	return m.client.Disconnect(ctx)
+}
+
+// GetDatabase returns the database instance
+func (m *MongoDB) GetDatabase() *mongo.Database {
+	return m.database
+}
+
+// GetClient returns the client instance
+func (m *MongoDB) GetClient() *mongo.Client {
+	return m.client
+}
+
+// TasksCollection returns the tasks collection
+func (m *MongoDB) TasksCollection() *mongo.Collection {
+	return m.database.Collection("tasks")
+}
+
+// QueuesCollection returns the queues collection
+func (m *MongoDB) QueuesCollection() *mongo.Collection {
+	return m.database.Collection("queues")
+}
+
+// WorkerSessionsCollection returns the worker sessions collection
+func (m *MongoDB) WorkerSessionsCollection() *mongo.Collection {
+	return m.database.Collection("worker_sessions")
+}
+
+// ProvisionersCollection returns the provisioners collection
+func (m *MongoDB) ProvisionersCollection() *mongo.Collection {
+	return m.database.Collection("provisioners")
+}
+
+// createIndexes creates necessary database indexes
+func (m *MongoDB) createIndexes(ctx context.Context) error {
+	// Tasks collection indexes
+	tasksIndexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{{"status", 1}},
+		},
+		{
+			Keys: bson.D{{"queue", 1}},
+		},
+		{
+			Keys: bson.D{{"created_at", 1}},
+		},
+		{
+			Keys: bson.D{{"worker_id", 1}},
+		},
+		{
+			Keys: bson.D{{"status", 1}, {"queue", 1}},
+		},
+		{
+			Keys: bson.D{{"status", 1}, {"created_at", 1}},
+		},
+	}
+
+	if _, err := m.TasksCollection().Indexes().CreateMany(ctx, tasksIndexes); err != nil {
+		return fmt.Errorf("failed to create tasks indexes: %w", err)
+	}
+
+	// Queues collection indexes
+	queuesIndexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{{"status", 1}},
+		},
+		{
+			Keys: bson.D{{"created_at", 1}},
+		},
+	}
+
+	if _, err := m.QueuesCollection().Indexes().CreateMany(ctx, queuesIndexes); err != nil {
+		return fmt.Errorf("failed to create queues indexes: %w", err)
+	}
+
+	// Worker sessions collection indexes
+	workerSessionsIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{"worker_id", 1}},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys: bson.D{{"provisioner_name", 1}},
+		},
+		{
+			Keys: bson.D{{"status", 1}},
+		},
+		{
+			Keys: bson.D{{"last_heartbeat", 1}},
+		},
+		{
+			Keys: bson.D{{"connected_at", 1}},
+		},
+		// TTL index for cleanup - remove sessions after 1 hour of no heartbeat
+		{
+			Keys:    bson.D{{"last_heartbeat", 1}},
+			Options: options.Index().SetExpireAfterSeconds(3600),
+		},
+	}
+
+	if _, err := m.WorkerSessionsCollection().Indexes().CreateMany(ctx, workerSessionsIndexes); err != nil {
+		return fmt.Errorf("failed to create worker_sessions indexes: %w", err)
+	}
+
+	// Provisioners collection indexes
+	provisionersIndexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{"name", 1}},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys: bson.D{{"status", 1}},
+		},
+		{
+			Keys: bson.D{{"last_heartbeat", 1}},
+		},
+	}
+
+	if _, err := m.ProvisionersCollection().Indexes().CreateMany(ctx, provisionersIndexes); err != nil {
+		return fmt.Errorf("failed to create provisioners indexes: %w", err)
+	}
+
+	return nil
+}
+
+// Health checks the database health
+func (m *MongoDB) Health(ctx context.Context) error {
+	return m.client.Ping(ctx, nil)
+}
+
+// GetTaskRepository returns the task repository
+func (m *MongoDB) GetTaskRepository() database2.TaskRepositoryInterface {
+	return m.taskRepo
+}
+
+// GetQueueRepository returns the queue repository
+func (m *MongoDB) GetQueueRepository() database2.QueueRepositoryInterface {
+	return m.queueRepo
+}
+
+// GetWorkerSessionRepository returns the worker session repository
+func (m *MongoDB) GetWorkerSessionRepository() database2.WorkerSessionRepositoryInterface {
+	return m.workerSessionRepo
+}
