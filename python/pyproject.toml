@@ -1,0 +1,112 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distworker-sdk"
+version = "1.0.0"
+authors = [
+    {name = "JC-Lab", email = "jc@jc-lab.net"},
+]
+description = "Python SDK for DistWorker distributed task processing system"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+]
+keywords = ["distributed", "worker", "task", "processing", "websocket", "protobuf"]
+dependencies = [
+    "websockets>=11.0.0",
+    "protobuf>=4.21.0",
+    "googleapis-common-protos>=1.59.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+examples = [
+    "aiohttp>=3.8.0",
+    "aiofiles>=23.0.0",
+    "Pillow>=10.0.0",
+]
+
+[project.scripts]
+distworker-basic = "distworker.examples.basic_worker:main"
+distworker-file = "distworker.examples.file_worker:main"
+
+[project.urls]
+Homepage = "https://github.com/jc-lab/distworker"
+"Bug Reports" = "https://github.com/jc-lab/distworker/issues"
+"Source" = "https://github.com/jc-lab/distworker"
+"Documentation" = "https://github.com/jc-lab/distworker/blob/main/README.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["distworker*"]
+
+[tool.setuptools.package-data]
+distworker = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = "distworker.client.protocol_pb2"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

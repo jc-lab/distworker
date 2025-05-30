@@ -1,0 +1,9 @@
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+recursive-include distworker *.py
+recursive-include distworker *.pyi
+recursive-exclude distworker __pycache__
+recursive-exclude distworker *.pyc
+recursive-exclude distworker *.pyo

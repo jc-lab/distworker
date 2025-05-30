@@ -46,9 +46,9 @@ message WorkerRegister {
 }
 
 message SignedWorkerRegister {
-  string worker_id = 1;
-  string date = 2; // 20220830T123600Z 형식
-  repeated string queue_patterns = 3; // Queue 패턴 목록
+  string provisioner_name = 1;
+  string worker_id = 2; // 만약 provisioner 가 worker 을 만든 경우 라면
+  string date = 3; // 20220830T123600Z 형식
   ResourceInfo resource_info = 4;
 }
 
@@ -94,9 +94,10 @@ message Heartbeat {
 
 // Worker 리소스 정보
 message ResourceInfo {
-  int32 cpu_cores = 1;          // CPU 코어 수
-  int64 memory_mb = 2;          // 메모리 (MiB)
-  google.protobuf.Struct additional = 3;  // 추가 리소스 정보
+  string hostname = 1;
+  int32 cpu_cores = 2;          // CPU 코어 수
+  int64 memory_mb = 3;          // 메모리 (MiB)
+  google.protobuf.Struct additional = 4;  // 추가 리소스 정보
 }
 
 // 리소스 사용량
