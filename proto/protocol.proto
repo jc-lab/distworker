@@ -9,21 +9,21 @@ import "google/protobuf/struct.proto";
 // 메시지 타입 열거형
 enum MessageType {
   MESSAGE_TYPE_UNSPECIFIED = 0;
-  MESSAGE_TYPE_WORKER_REGISTER = 1;
-  MESSAGE_TYPE_HEARTBEAT = 2;
-  MESSAGE_TYPE_TASK_ASSIGN = 3;
-  MESSAGE_TYPE_TASK_PROGRESS = 4;
-  MESSAGE_TYPE_TASK_COMPLETE = 5;
-  MESSAGE_TYPE_TASK_FAILED = 6;
+  MESSAGE_TYPE_WORKER_REGISTER = 2;
+  MESSAGE_TYPE_WORKER_REGISTER_RESPONSE = 3;
+  MESSAGE_TYPE_HEARTBEAT = 9;
+  MESSAGE_TYPE_TASK_ASSIGN = 10;
+  MESSAGE_TYPE_TASK_PROGRESS = 11;
+  MESSAGE_TYPE_TASK_COMPLETE = 12;
+  MESSAGE_TYPE_TASK_FAILED = 13;
 }
 
 // Worker 상태 열거형
-enum WorkerStatus {
-  WORKER_STATUS_UNSPECIFIED = 0;
-  WORKER_STATUS_IDLE = 1;
-  WORKER_STATUS_PROCESSING = 2;
-  WORKER_STATUS_DISCONNECTING = 3;
-  WORKER_STATUS_ERROR = 4;
+enum WorkerHealth {
+  WORKER_HEALTH_UNSPECIFIED = 0;
+  WORKER_HEALTH_UP = 1;
+  WORKER_HEALTH_DOWN = 2;
+  WORKER_HEALTH_WARN = 3;
 }
 
 // Task 상태 열거형
@@ -43,6 +43,10 @@ enum TaskStatus {
 message WorkerRegister {
   bytes data = 1; // SignedWorkerRegister 에 대한 marshaled 값
   bytes signature = 2; // HMAC-SHA256(key = <SigningKey>, data = data)
+}
+
+message WorkerRegisterResponse {
+  int32 idle_time = 10; // seconds (0 is infinite)
 }
 
 message SignedWorkerRegister {
@@ -88,7 +92,7 @@ message TaskFailed {
 // 연결 상태 유지
 message Heartbeat {
   int64 timestamp = 1;          // 타임스탬프 (Unix milliseconds)
-  WorkerStatus status = 2;      // Worker 상태
+  WorkerHealth health = 2;      // Worker 상태
   ResourceUsage resource_usage = 3;  // 리소스 사용량
 }
 
@@ -122,10 +126,11 @@ message WebSocketMessage {
   MessageType type = 1;
   oneof payload {
     WorkerRegister worker_register = 2;
-    Heartbeat heartbeat = 3;
-    TaskAssign task_assign = 4;
-    TaskProgress task_progress = 5;
-    TaskComplete task_complete = 6;
-    TaskFailed task_failed = 7;
+    WorkerRegisterResponse worker_register_response = 3;
+    Heartbeat heartbeat = 9;
+    TaskAssign task_assign = 10;
+    TaskProgress task_progress = 11;
+    TaskComplete task_complete = 12;
+    TaskFailed task_failed = 13;
   }
 }

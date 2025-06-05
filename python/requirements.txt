@@ -8,3 +8,5 @@ protobuf>=4.21.0
 
 # Google protobuf struct utilities
 googleapis-common-protos>=1.59.0
+
+psutil>=7.0.0

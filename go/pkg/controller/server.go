@@ -1,8 +1,27 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package controller
 
 import (
 	"context"
 	"fmt"
+	"github.com/gorilla/handlers"
 	"github.com/jc-lab/distworker/go/internal/provisioner"
 	"github.com/jc-lab/distworker/go/internal/version"
 	config2 "github.com/jc-lab/distworker/go/pkg/controller/config"
@@ -13,6 +32,7 @@ import (
 	models2 "github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 	"log"
 	"net/http"
 	"runtime"
@@ -25,9 +45,12 @@ import (
 
 // Server represents the main controller server
 type Server struct {
-	config   *config2.Config
-	db       database2.Database
-	storage  storage.Storage
+	config     *config2.Config
+	db         database2.Database
+	storage    storage.Storage
+	rootLogger *zap.Logger
+	logger     *zap.SugaredLogger
+
 	router   *mux.Router
 	wsRouter *mux.Router
 	upgrader websocket.Upgrader
@@ -38,7 +61,7 @@ type Server struct {
 	startTime      time.Time
 
 	// Provisioner management
-	provisionerManager *provisioner.Manager
+	provisionerManager provisioner.Manager
 
 	// Worker management
 	workerManager *wsmanager.WorkerManager
@@ -50,6 +73,9 @@ type Server struct {
 // NewServer creates a new controller server
 func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 	var err error
+
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = cancel
 
 	// Initialize metrics
 	promRegistry := prometheus.NewRegistry()
@@ -79,6 +105,11 @@ func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 		}
 	}
 
+	if server.rootLogger == nil {
+		server.rootLogger = makeDefaultLogger()
+	}
+	server.logger = server.rootLogger.Named("server").Sugar()
+
 	if server.storage == nil {
 		if err := defaultStorage(config, server); err != nil {
 			return nil, err
@@ -91,12 +122,14 @@ func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 		}
 	}
 
-	server.provisionerManager, err = provisioner.NewManager(config.Provisioner)
+	server.provisionerManager, err = provisioner.NewManager(ctx, config.Provisioner, &config.Server.Worker, server.db, server.rootLogger)
 	if err != nil {
 		return nil, err
 	}
 
-	server.workerManager = wsmanager.NewWorkerManager(server.db, server.provisionerManager)
+	server.workerManager = wsmanager.NewWorkerManager(ctx, server.db, server.provisionerManager, server.rootLogger)
+
+	server.provisionerManager.SetWorkerManager(server.workerManager)
 
 	// Setup routes
 	server.setupAPIRoutes()
@@ -120,6 +153,10 @@ func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 
 // Start starts the server
 func (s *Server) Start() error {
+	if err := s.workerManager.Start(); err != nil {
+		return err
+	}
+
 	// Start API server
 	apiServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.Server.API.Port),
@@ -136,6 +173,10 @@ func (s *Server) Start() error {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
+	}
+
+	if s.config.ControllerSetting.WorkerAccessibleBaseUrl == "" {
+		s.config.ControllerSetting.WorkerAccessibleBaseUrl = fmt.Sprintf("http://127.0.0.1:%d", s.config.Server.Worker.Port)
 	}
 
 	// Start metrics collection goroutine
@@ -166,13 +207,17 @@ func (s *Server) Start() error {
 	log.Println("Shutting down servers...")
 
 	// Shutdown worker manager first
+	log.Println("Shutting down worker manager...")
 	if s.workerManager != nil {
 		s.workerManager.Shutdown()
 	}
 
+	log.Println("Shutting down api server...")
 	if err := apiServer.Shutdown(ctx); err != nil {
 		log.Printf("API server shutdown error: %v", err)
 	}
+
+	log.Println("Shutting down worker server...")
 	if err := workerServer.Shutdown(ctx); err != nil {
 		log.Printf("Worker server shutdown error: %v", err)
 	}
@@ -200,6 +245,9 @@ func (s *Server) Stop() {
 // setupAPIRoutes sets up HTTP API routes
 func (s *Server) setupAPIRoutes() {
 	api := s.router.PathPrefix("/api/v1").Subrouter()
+	api.Use(handlers.CORS(
+		handlers.AllowedMethods([]string{"GET"}),
+	))
 
 	// Task routes
 	api.HandleFunc("/tasks", s.handleCreateTask).Methods("POST")
@@ -287,8 +335,9 @@ func (s *Server) startMetricsCollection() {
 				time.Since(s.startTime),
 			)
 
-			// Collect database statistics
+			// Collect statistics
 			s.metrics.CollectDatabaseStats(ctx, s.db)
+			s.metrics.CollectWorkerStats(ctx, s.workerManager)
 
 		case <-s.shutdown:
 			return

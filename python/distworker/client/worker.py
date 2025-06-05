@@ -5,6 +5,7 @@ DistWorker Python SDK - Worker Class
 import asyncio
 import logging
 import socket
+import time
 import traceback
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable, Awaitable
@@ -17,11 +18,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatusCode
 from .auth import generate_websocket_signature, DATE_ONLY_FORMAT, DATE_FORMAT
 from .exceptions import ConnectionError, AuthenticationError, TaskError, ProtocolError
 from .task import Task
-from ..protocol.protocol_pb2 import (
-    WebSocketMessage, MessageType, WorkerRegister, SignedWorkerRegister,
-    ResourceInfo, Heartbeat, ResourceUsage, TaskProgress, TaskComplete,
-    TaskFailed, TaskAssign
-)
+from ..protocol import protocol_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +29,13 @@ class Worker:
     
     Connects to the DistWorker controller and processes assigned tasks.
     """
+
+    task_handler: Callable[[Task], Awaitable[Dict[str, Any]]]
     
     def __init__(
         self,
         controller_url: str,
-        provisioner_name: str,
+        provisioner: str,
         worker_id: str,
         worker_token: str,
         resource_info: Optional[dict[str, Any]] = None,
@@ -56,8 +55,8 @@ class Worker:
             heartbeat_interval: Seconds between heartbeat messages
             max_reconnect_attempts: Maximum reconnection attempts (-1 for unlimited)
         """
-        self.controller_url = controller_url
-        self.provisioner_name = provisioner_name
+        self.controller_url = urlparse(controller_url)
+        self.provisioner = provisioner
         self.worker_id = worker_id
         self.worker_token = worker_token
         self.resource_info = resource_info or {}
@@ -72,23 +71,27 @@ class Worker:
         self.reconnect_count = 0
         
         # Task handling
-        self.task_handlers: Dict[str, Callable[[Task], Awaitable[Dict[str, Any]]]] = {}
+        self.task_handler = self._default_task_handler
         self.current_task: Optional[Task] = None
+
+        self.max_idle_time: int = 0
+        self.last_processed: float = time.monotonic()
         
         # Background tasks
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._connection_task: Optional[asyncio.Task] = None
-        
-    def register_handler(self, queue_pattern: str, handler: Callable[[Task], Awaitable[Dict[str, Any]]]):
-        """
-        Register a task handler for a specific queue pattern
-        
-        Args:
-            queue_pattern: Queue pattern to handle (supports * and # wildcards)
-            handler: Async function that processes tasks and returns results
-        """
-        self.task_handlers[queue_pattern] = handler
-        
+
+    async def _default_task_handler(self, task: Task) -> Dict[str, Any]:
+        raise NotImplementedError()
+
+    async def run(self):
+        await self.start()
+        while True:
+            idle_time = int(time.monotonic() - self.last_processed)
+            if 0 < self.max_idle_time < idle_time and self.current_task is None:
+                break
+            await asyncio.sleep(1)
+
     async def start(self):
         """Start the worker and connect to the controller"""
         if self.running:
@@ -99,7 +102,7 @@ class Worker:
         
         # Start connection management task
         self._connection_task = asyncio.create_task(self._connection_manager())
-        
+
     async def stop(self):
         """Stop the worker and disconnect from the controller"""
         if not self.running:
@@ -143,7 +146,7 @@ class Worker:
         """Connect to controller and handle messages"""
         try:
             # Parse controller URL
-            parsed_url = urlparse(self.controller_url)
+            parsed_url = self.controller_url._replace()
             if parsed_url.scheme not in ['http', 'https']:
                 raise ConnectionError(f"Invalid Controller URL scheme: {parsed_url.scheme}")
 
@@ -199,10 +202,10 @@ class Worker:
             now = datetime.utcnow()
 
             # Create resource info protobuf
-            resource_proto = ResourceInfo()
+            resource_proto = protocol_pb2.ResourceInfo()
             resource_proto.hostname = self.resource_info.get('hostname', socket.gethostname())
             resource_proto.cpu_cores = self.resource_info.get('cpu_cores', psutil.cpu_count(logical=True))
-            resource_proto.memory_mb = self.resource_info.get('memory_mb', psutil.virtual_memory().total/1024/1024)
+            resource_proto.memory_mb = self.resource_info.get('memory_mb', int(psutil.virtual_memory().total/1024/1024))
             
             # Add additional resource info
             additional = {}
@@ -215,8 +218,8 @@ class Worker:
                 resource_proto.additional.update(additional)
             
             # Create signed registration
-            signed_register = SignedWorkerRegister()
-            signed_register.provisioner_name = self.provisioner_name
+            signed_register = protocol_pb2.SignedWorkerRegister()
+            signed_register.provisioner_name = self.provisioner
             signed_register.worker_id = self.worker_id
             signed_register.date = now.strftime(DATE_FORMAT)
             signed_register.resource_info.CopyFrom(resource_proto)
@@ -224,15 +227,15 @@ class Worker:
             # Serialize for signing
             signed_data = signed_register.SerializeToString()
             
-            register = WorkerRegister()
+            register = protocol_pb2.WorkerRegister()
             register.data = signed_data
             register.signature = generate_websocket_signature(
                 self.worker_token, now.strftime(DATE_ONLY_FORMAT), signed_data
             )
             
             # Create WebSocket message
-            ws_msg = WebSocketMessage()
-            ws_msg.type = MessageType.MESSAGE_TYPE_WORKER_REGISTER
+            ws_msg = protocol_pb2.WebSocketMessage()
+            ws_msg.type = protocol_pb2.MessageType.MESSAGE_TYPE_WORKER_REGISTER
             ws_msg.worker_register.CopyFrom(register)
             
             # Send registration
@@ -259,19 +262,19 @@ class Worker:
         """Send heartbeat message with current status"""
         try:
             # Create resource usage
-            resource_usage = ResourceUsage()
+            resource_usage = protocol_pb2.ResourceUsage()
             resource_usage.cpu_percent = self.resource_info.get('cpu_percent', 0.0)
             resource_usage.memory_used_mb = self.resource_info.get('memory_used_mb', 0)
             resource_usage.gpu_utilization = self.resource_info.get('gpu_utilization', 0.0)
             
             # Create heartbeat
-            heartbeat = Heartbeat()
-            heartbeat.status = 1 if self.current_task is None else 2  # IDLE or PROCESSING
+            heartbeat = protocol_pb2.Heartbeat()
+            heartbeat.health = protocol_pb2.WORKER_HEALTH_UP
             heartbeat.resource_usage.CopyFrom(resource_usage)
             
             # Create WebSocket message
-            ws_msg = WebSocketMessage()
-            ws_msg.type = MessageType.MESSAGE_TYPE_HEARTBEAT
+            ws_msg = protocol_pb2.WebSocketMessage()
+            ws_msg.type = protocol_pb2.MESSAGE_TYPE_HEARTBEAT
             ws_msg.heartbeat.CopyFrom(heartbeat)
             
             await self._send_message(ws_msg)
@@ -293,18 +296,23 @@ class Worker:
     async def _handle_binary_message(self, data: bytes):
         """Handle binary protobuf messages"""
         try:
-            ws_msg = WebSocketMessage()
+            ws_msg = protocol_pb2.WebSocketMessage()
             ws_msg.ParseFromString(data)
-            
-            if ws_msg.type == MessageType.MESSAGE_TYPE_TASK_ASSIGN:
+
+            if ws_msg.type == protocol_pb2.MESSAGE_TYPE_WORKER_REGISTER_RESPONSE:
+                await self._handle_register_response(ws_msg.worker_register_response)
+            elif ws_msg.type == protocol_pb2.MESSAGE_TYPE_TASK_ASSIGN:
                 await self._handle_task_assignment(ws_msg.task_assign)
             else:
                 logger.warning(f"Unknown message type: {ws_msg.type}")
                 
         except Exception as e:
             raise ProtocolError(f"Failed to parse message: {e}")
-            
-    async def _handle_task_assignment(self, task_assign: TaskAssign):
+
+    async def _handle_register_response(self, message: protocol_pb2.WorkerRegisterResponse):
+        self.max_idle_time = message.idle_time
+
+    async def _handle_task_assignment(self, task_assign: protocol_pb2.TaskAssign):
         """Handle task assignment from controller"""
         try:
             if self.current_task is not None:
@@ -328,34 +336,17 @@ class Worker:
             )
             
             self.current_task = task
-            
-            # Find matching handler
-            handler = self._find_handler(task.queue)
-            if not handler:
-                await self._send_task_failed(
-                    task.task_id, 
-                    "NO_HANDLER", 
-                    f"No handler found for queue: {task.queue}"
-                )
-                return
-                
+
             logger.info(f"Processing task {task.task_id} from queue {task.queue}")
             
             # Process task in background
-            asyncio.create_task(self._process_task(task, handler))
+            asyncio.create_task(self._process_task(task))
             
         except Exception as e:
             logger.error(f"Task assignment error: {e}")
             if task_assign.task_id:
                 await self._send_task_failed(task_assign.task_id, "INTERNAL_ERROR", str(e))
-                
-    def _find_handler(self, queue: str) -> Optional[Callable]:
-        """Find handler that matches the queue pattern"""
-        for pattern, handler in self.task_handlers.items():
-            if self._match_queue_pattern(pattern, queue):
-                return handler
-        return None
-        
+
     def _match_queue_pattern(self, pattern: str, queue: str) -> bool:
         """Match queue against pattern (supports * and # wildcards)"""
         pattern_parts = pattern.split('.')
@@ -385,11 +376,11 @@ class Worker:
         else:
             return False
             
-    async def _process_task(self, task: Task, handler: Callable):
+    async def _process_task(self, task: Task):
         """Process task with handler"""
         try:
             # Call task handler
-            result = await handler(task)
+            result = await self.task_handler(task)
             
             # Send completion
             await self._send_task_complete(task.task_id, result)
@@ -400,11 +391,12 @@ class Worker:
             await self._send_task_failed(task.task_id, "HANDLER_ERROR", str(e))
         finally:
             self.current_task = None
+            self.last_processed = time.monotonic()
             
     async def _send_task_progress(self, task_id: str, progress: float, message: str = "", data: Optional[Dict] = None):
         """Send task progress update"""
         try:
-            task_progress = TaskProgress()
+            task_progress = protocol_pb2.TaskProgress()
             task_progress.task_id = task_id
             task_progress.progress = progress
             task_progress.message = message
@@ -414,8 +406,8 @@ class Worker:
                 task_progress.data.CopyFrom(Struct())
                 task_progress.data.update(data)
                 
-            ws_msg = WebSocketMessage()
-            ws_msg.type = MessageType.MESSAGE_TYPE_TASK_PROGRESS
+            ws_msg = protocol_pb2.WebSocketMessage()
+            ws_msg.type = protocol_pb2.MESSAGE_TYPE_TASK_PROGRESS
             ws_msg.task_progress.CopyFrom(task_progress)
             
             await self._send_message(ws_msg)
@@ -426,7 +418,7 @@ class Worker:
     async def _send_task_complete(self, task_id: str, result: Dict[str, Any], result_files: Optional[List[Dict]] = None):
         """Send task completion"""
         try:
-            task_complete = TaskComplete()
+            task_complete = protocol_pb2.TaskComplete()
             task_complete.task_id = task_id
             
             if result:
@@ -443,8 +435,8 @@ class Worker:
                     file_proto.size = file_info.get('size', 0)
                     file_proto.storage_url = file_info.get('storage_url', '')
                     
-            ws_msg = WebSocketMessage()
-            ws_msg.type = MessageType.MESSAGE_TYPE_TASK_COMPLETE
+            ws_msg = protocol_pb2.WebSocketMessage()
+            ws_msg.type = protocol_pb2.MESSAGE_TYPE_TASK_COMPLETE
             ws_msg.task_complete.CopyFrom(task_complete)
             
             await self._send_message(ws_msg)
@@ -455,7 +447,7 @@ class Worker:
     async def _send_task_failed(self, task_id: str, error_code: str, error_message: str, error_details: Optional[Dict] = None):
         """Send task failure"""
         try:
-            task_failed = TaskFailed()
+            task_failed = protocol_pb2.TaskFailed()
             task_failed.task_id = task_id
             task_failed.error_code = error_code
             task_failed.error_message = error_message
@@ -465,8 +457,8 @@ class Worker:
                 task_failed.error_details.CopyFrom(Struct())
                 task_failed.error_details.update(error_details)
                 
-            ws_msg = WebSocketMessage()
-            ws_msg.type = MessageType.MESSAGE_TYPE_TASK_FAILED
+            ws_msg = protocol_pb2.WebSocketMessage()
+            ws_msg.type = protocol_pb2.MESSAGE_TYPE_TASK_FAILED
             ws_msg.task_failed.CopyFrom(task_failed)
             
             await self._send_message(ws_msg)
@@ -474,7 +466,7 @@ class Worker:
         except Exception as e:
             logger.error(f"Failed to send task failure: {e}")
             
-    async def _send_message(self, message: WebSocketMessage):
+    async def _send_message(self, message: protocol_pb2.WebSocketMessage):
         """Send protobuf message over WebSocket"""
         if not self.websocket or not self.connected:
             raise ConnectionError("Not connected to controller")

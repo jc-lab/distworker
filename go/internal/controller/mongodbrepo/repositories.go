@@ -1,3 +1,21 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package mongodbrepo
 
 import (
@@ -62,8 +80,11 @@ func (r *TaskRepository) List(ctx context.Context, filter database.TaskFilter, p
 	if filter.Queue != "" {
 		mongoFilter["queue"] = filter.Queue
 	}
-	if filter.Status != "" {
-		mongoFilter["status"] = filter.Status
+	if filter.StatusGte < filter.StatusLt {
+		mongoFilter["status"] = bson.M{
+			"$gte": filter.StatusGte,
+			"$lt":  filter.StatusLt,
+		}
 	}
 	if filter.WorkerId != "" {
 		mongoFilter["worker_id"] = filter.WorkerId
@@ -96,29 +117,98 @@ func (r *TaskRepository) List(ctx context.Context, filter database.TaskFilter, p
 	return tasks, total, nil
 }
 
-// GetPendingTasks retrieves pending tasks for a queue
-func (r *TaskRepository) GetPendingTasks(ctx context.Context, queue string, limit int) ([]*models2.Task, error) {
-	filter := bson.M{
-		"status": types.TaskStatusPending,
-		"queue":  queue,
+func (r *TaskRepository) ListAll(ctx context.Context, filter database.TaskFilter) (chan *models2.Task, error) {
+	findOptions := options.Find().SetSort(bson.D{{"_id", 1}})
+
+	mongoFilter := bson.M{}
+	if filter.Queue != "" {
+		mongoFilter["queue"] = filter.Queue
+	}
+	if filter.StatusGte < filter.StatusLt {
+		mongoFilter["status"] = bson.M{
+			"$gte": filter.StatusGte,
+			"$lt":  filter.StatusLt,
+		}
+	}
+	if filter.WorkerId != "" {
+		mongoFilter["workerId"] = filter.WorkerId
 	}
 
-	findOptions := options.Find().
-		SetLimit(int64(limit)).
-		SetSort(bson.D{{"created_at", 1}})
+	cursor, err := r.db.TasksCollection().Find(ctx, mongoFilter, findOptions)
+	if err != nil {
+		return nil, err
+	}
 
-	cursor, err := r.db.TasksCollection().Find(ctx, filter, findOptions)
+	taskChan := make(chan *models2.Task)
+	go func() {
+		defer close(taskChan)
+		defer cursor.Close(ctx)
+		for cursor.Next(ctx) {
+			task := &models2.Task{}
+			if err := cursor.Decode(task); err != nil {
+				break
+			}
+			taskChan <- task
+		}
+	}()
+
+	return taskChan, nil
+}
+
+func (r *TaskRepository) Stat(ctx context.Context) (*database.TaskCollectionStat, error) {
+	cursor, err := r.db.TasksCollection().Aggregate(ctx, mongo.Pipeline{
+		{{"$group",
+			bson.D{{
+				"_id",
+				bson.D{
+					{"queue", "$queue"},
+					{"status", "$status"},
+				}},
+				{"count", bson.D{{"$sum", "1"}}},
+				{"error", bson.D{{"$sum", bson.D{
+					{"$cond", bson.A{
+						bson.D{{"$ne", bson.A{"$error", nil}}}, // error 필드가 null이 아닌 경우
+						1,                                      // true일 때 1을 더함
+						0,                                      // false일 때 0을 더함
+					}},
+				}}}},
+			},
+		}},
+	})
 	if err != nil {
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
-	var tasks []*models2.Task
-	if err := cursor.All(ctx, &tasks); err != nil {
+	var rows []TaskCollectionStat
+	if err := cursor.All(ctx, &rows); err != nil {
 		return nil, err
 	}
 
-	return tasks, nil
+	result := &database.TaskCollectionStat{
+		Queues: make(map[string]*database.TaskCollectionStatCounter),
+	}
+	for _, row := range rows {
+		queueStat, ok := result.Queues[row.Id.Queue]
+		if !ok {
+			queueStat = &database.TaskCollectionStatCounter{}
+			result.Queues[row.Id.Queue] = queueStat
+		}
+		switch row.Id.Status {
+		case types.TaskStatusPending:
+			queueStat.Pending = row.Count
+		case types.TaskStatusProcessing:
+			queueStat.Pending = row.Count
+		case types.TaskStatusCompleted:
+			queueStat.Completed = row.Count
+			queueStat.Error += row.Error
+		case types.TaskStatusFinished:
+			queueStat.Finished = row.Count
+			queueStat.Error += row.Error
+		}
+	}
+
+	return result, nil
 }
 
 // QueueRepository handles queue database operations for MongoDB
@@ -241,11 +331,11 @@ func (r *WorkerSessionRepository) List(ctx context.Context) ([]*models2.WorkerSe
 }
 
 // UpdateHeartbeat updates the last heartbeat time for a worker
-func (r *WorkerSessionRepository) UpdateHeartbeat(ctx context.Context, workerId string, status types.WorkerStatus) error {
+func (r *WorkerSessionRepository) UpdateHeartbeat(ctx context.Context, workerId string, health types.WorkerHealth) error {
 	update := bson.M{
 		"$set": bson.M{
 			"last_heartbeat": models2.Now(),
-			"status":         status,
+			"health":         health,
 		},
 	}
 	_, err := r.db.WorkerSessionsCollection().UpdateOne(ctx, bson.M{"_id": workerId}, update)

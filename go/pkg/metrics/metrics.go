@@ -1,8 +1,27 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package metrics
 
 import (
 	"context"
 	"github.com/jc-lab/distworker/go/pkg/controller/database"
+	"github.com/jc-lab/distworker/go/pkg/controller/websocket"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"time"
 
@@ -249,62 +268,95 @@ func (m *Metrics) UpdateSystemMetrics(version, buildTime, goVersion string, upti
 // CollectDatabaseStats collects current database statistics
 func (m *Metrics) CollectDatabaseStats(ctx context.Context, db database.Database) {
 	// Collect task counts by status
-	pendingTasks, _, _ := db.GetTaskRepository().List(ctx, database.TaskFilter{Status: string(types.TaskStatusPending)}, 1, 1)
-	if pendingTasks != nil {
-		m.TasksPending.Set(float64(len(pendingTasks)))
-	}
+	stat, _ := db.GetTaskRepository().Stat(ctx)
+	if stat != nil {
+		total := stat.Total()
+		m.TasksPending.Set(float64(total.Pending))
+		m.TasksInProgress.Set(float64(total.Processing))
 
-	processingTasks, _, _ := db.GetTaskRepository().List(ctx, database.TaskFilter{Status: string(types.TaskStatusProcessing)}, 1, 1)
-	if processingTasks != nil {
-		m.TasksInProgress.Set(float64(len(processingTasks)))
+		for queue, counter := range stat.Queues {
+			m.QueueTasksTotal.WithLabelValues(queue, types.TaskStatusPending.String()).Set(float64(counter.Pending))
+			m.QueueTasksTotal.WithLabelValues(queue, types.TaskStatusProcessing.String()).Set(float64(counter.Processing))
+			m.QueueTasksTotal.WithLabelValues(queue, types.TaskStatusCompleted.String()).Set(float64(counter.Completed))
+			m.QueueTasksTotal.WithLabelValues(queue, types.TaskStatusFinished.String()).Set(float64(counter.Finished))
+			m.QueueTasksTotal.WithLabelValues(queue, "success").Set(float64(counter.Completed + counter.Finished - counter.Error))
+			m.QueueTasksTotal.WithLabelValues(queue, "error").Set(float64(counter.Error))
+		}
 	}
 
 	// Collect queue counts
 	queues, _ := db.GetQueueRepository().List(ctx)
 	if queues != nil {
 		m.QueuesTotal.Set(float64(len(queues)))
+	}
 
-		// Collect tasks per queue
-		for _, queue := range queues {
-			for _, status := range []types.TaskStatus{types.TaskStatusPending, types.TaskStatusProcessing, types.TaskStatusCompleted, types.TaskStatusFailed, types.TaskStatusCancelled} {
-				tasks, total, _ := db.GetTaskRepository().List(ctx, database.TaskFilter{Queue: queue.Name, Status: string(status)}, 1, 1)
-				_ = tasks // We only need the total count
-				m.QueueTasksTotal.WithLabelValues(queue.Name, string(status)).Set(float64(total))
-			}
+	//// Collect worker session counts
+	//sessions, _ := db.GetWorkerSessionRepository().List(ctx)
+	//if sessions != nil {
+	//	m.WorkerSessions.Set(float64(len(sessions)))
+	//
+	//	// Count workers by status
+	//	statusCounts := make(map[types.WorkerStatus]int)
+	//	provisionerCounts := make(map[string]map[types.WorkerStatus]int)
+	//
+	//	for _, session := range sessions {
+	//		statusCounts[session.GetStatus()]++
+	//
+	//		if provisionerCounts[session.ProvisionerName] == nil {
+	//			provisionerCounts[session.ProvisionerName] = make(map[types.WorkerStatus]int)
+	//		}
+	//		provisionerCounts[session.ProvisionerName][session.Status]++
+	//	}
+	//
+	//	// Update worker metrics
+	//	for status, count := range statusCounts {
+	//		m.WorkersTotal.WithLabelValues(string(status), "").Set(float64(count))
+	//	}
+	//
+	//	for provisioner, statusMap := range provisionerCounts {
+	//		for status, count := range statusMap {
+	//			m.WorkersTotal.WithLabelValues(string(status), provisioner).Set(float64(count))
+	//		}
+	//	}
+	//
+	//	// Count connected workers
+	//	connectedCount := statusCounts[types.WorkerStatusIdle] + statusCounts[types.WorkerStatusProcessing]
+	//	m.WorkersConnected.Set(float64(connectedCount))
+	//}
+}
+
+// CollectDatabaseStats collects current database statistics
+func (m *Metrics) CollectWorkerStats(ctx context.Context, wm *websocket.WorkerManager) {
+	workers := wm.GetWorkersInfo()
+
+	// Collect worker worker counts
+	m.WorkerSessions.Set(float64(len(workers)))
+
+	// Count workers by status
+	statusCounts := make(map[types.WorkerStatus]int)
+	provisionerCounts := make(map[string]map[types.WorkerStatus]int)
+
+	for _, worker := range workers {
+		statusCounts[worker.Status]++
+
+		if provisionerCounts[worker.Provisioner] == nil {
+			provisionerCounts[worker.Provisioner] = make(map[types.WorkerStatus]int)
+		}
+		provisionerCounts[worker.Provisioner][worker.Status]++
+	}
+
+	// Update worker metrics
+	for status, count := range statusCounts {
+		m.WorkersTotal.WithLabelValues(string(status), "").Set(float64(count))
+	}
+
+	for provisioner, statusMap := range provisionerCounts {
+		for status, count := range statusMap {
+			m.WorkersTotal.WithLabelValues(string(status), provisioner).Set(float64(count))
 		}
 	}
 
-	// Collect worker session counts
-	sessions, _ := db.GetWorkerSessionRepository().List(ctx)
-	if sessions != nil {
-		m.WorkerSessions.Set(float64(len(sessions)))
-
-		// Count workers by status
-		statusCounts := make(map[types.WorkerStatus]int)
-		provisionerCounts := make(map[string]map[types.WorkerStatus]int)
-
-		for _, session := range sessions {
-			statusCounts[session.Status]++
-
-			if provisionerCounts[session.ProvisionerName] == nil {
-				provisionerCounts[session.ProvisionerName] = make(map[types.WorkerStatus]int)
-			}
-			provisionerCounts[session.ProvisionerName][session.Status]++
-		}
-
-		// Update worker metrics
-		for status, count := range statusCounts {
-			m.WorkersTotal.WithLabelValues(string(status), "").Set(float64(count))
-		}
-
-		for provisioner, statusMap := range provisionerCounts {
-			for status, count := range statusMap {
-				m.WorkersTotal.WithLabelValues(string(status), provisioner).Set(float64(count))
-			}
-		}
-
-		// Count connected workers
-		connectedCount := statusCounts[types.WorkerStatusIdle] + statusCounts[types.WorkerStatusProcessing]
-		m.WorkersConnected.Set(float64(connectedCount))
-	}
+	// Count connected workers
+	connectedCount := statusCounts[types.WorkerStatusIdle] + statusCounts[types.WorkerStatusProcessing]
+	m.WorkersConnected.Set(float64(connectedCount))
 }

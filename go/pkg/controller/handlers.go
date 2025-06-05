@@ -1,3 +1,21 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package controller
 
 import (
@@ -65,6 +83,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		Input:     request.Input,
 		TimeoutMS: timeoutMS,
 		CreatedAt: models2.Now(),
+		MaxRetry:  request.Retry,
 	}
 
 	if err := s.db.GetTaskRepository().Create(r.Context(), task); err != nil {
@@ -72,12 +91,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try to assign the task to an available worker
-	go func() {
-		if err := s.workerManager.AssignTask(task); err != nil {
-			// Task will remain pending and be picked up by the assignment worker
-		}
-	}()
+	s.workerManager.RequestAssignTask(task)
 
 	writeJson(w, http.StatusOK, task)
 }
@@ -160,11 +174,7 @@ func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Try to assign the task to an available worker
-	go func() {
-		if err := s.workerManager.AssignTask(task); err != nil {
-			// Task will remain pending and be picked up by the assignment worker
-		}
-	}()
+	s.workerManager.RequestAssignTask(task)
 
 	writeJson(w, http.StatusOK, task)
 }
@@ -254,9 +264,10 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := database.TaskFilter{
-		Queue:  queue,
-		Status: status,
+		Queue: queue,
+		//FIXME: STATUS FILTERING
 	}
+	_ = status
 
 	tasks, total, err := s.db.GetTaskRepository().List(r.Context(), filter, page, limit)
 	if err != nil {
@@ -298,7 +309,11 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update task status to cancelled
-	task.Status = types.TaskStatusCancelled
+	task.Status = types.TaskStatusFinished
+	task.Error = &models2.TaskError{
+		Code:    types.TaskErrorCodeCancelled,
+		Message: "cancelled by user",
+	}
 	task.CompletedAt = models2.NowPtr()
 
 	if err := s.db.GetTaskRepository().Update(r.Context(), task); err != nil {
@@ -308,7 +323,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 
 	response := &api.DeleteTaskResponse{
 		TaskId: taskId,
-		Status: string(types.TaskStatusCancelled),
+		Status: task.Status,
 	}
 
 	writeJson(w, http.StatusOK, response)
@@ -435,16 +450,7 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 
 	workers := make([]*models2.Worker, len(sessions))
 	for i, session := range sessions {
-		workers[i] = &models2.Worker{
-			Id:            session.WorkerId,
-			Status:        session.Status,
-			Queues:        session.Queues,
-			CurrentTask:   session.CurrentTask,
-			ConnectedAt:   session.ConnectedAt,
-			LastHeartbeat: session.LastHeartbeat,
-			Provisioner:   session.ProvisionerName,
-			ResourceInfo:  session.ResourceInfo,
-		}
+		workers[i] = session.ToModel()
 	}
 
 	response := &api.ListWorkersResponse{
@@ -498,6 +504,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Collect latest metrics from database before serving
 	if s.metrics != nil {
 		s.metrics.CollectDatabaseStats(r.Context(), s.db)
+		s.metrics.CollectWorkerStats(r.Context(), s.workerManager)
 	}
 
 	// Serve Prometheus metrics

@@ -1,3 +1,21 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package database_mock
 
 import (
@@ -206,8 +224,7 @@ func (r *MockTaskRepository) List(ctx context.Context, filter database.TaskFilte
 	return filteredTasks[start:end], total, nil
 }
 
-// GetPendingTasks implements TaskRepositoryInterface
-func (r *MockTaskRepository) GetPendingTasks(ctx context.Context, queue string, limit int) ([]*models2.Task, error) {
+func (r *MockTaskRepository) ListAll(ctx context.Context, filter database.TaskFilter) (chan *models2.Task, error) {
 	r.db.mu.RLock()
 	defer r.db.mu.RUnlock()
 
@@ -215,20 +232,15 @@ func (r *MockTaskRepository) GetPendingTasks(ctx context.Context, queue string, 
 		return nil, errors.New("database is closed")
 	}
 
-	var pendingTasks []*models2.Task
-	count := 0
+	taskChan := make(chan *models2.Task, len(r.db.tasks))
 
 	for _, task := range r.db.tasks {
-		if task.Status == types.TaskStatusPending &&
-			(queue == "" || task.Queue == queue) &&
-			count < limit {
-			taskCopy := *task
-			pendingTasks = append(pendingTasks, &taskCopy)
-			count++
+		if r.matchesFilter(task, filter) {
+			taskChan <- task
 		}
 	}
 
-	return pendingTasks, nil
+	return taskChan, nil
 }
 
 func (r *MockTaskRepository) matchesFilter(task *models2.Task, filter database.TaskFilter) bool {
@@ -467,7 +479,7 @@ func (r *MockWorkerSessionRepository) List(ctx context.Context) ([]*models2.Work
 }
 
 // UpdateHeartbeat implements WorkerSessionRepositoryInterface
-func (r *MockWorkerSessionRepository) UpdateHeartbeat(ctx context.Context, workerId string, status types.WorkerStatus) error {
+func (r *MockWorkerSessionRepository) UpdateHeartbeat(ctx context.Context, workerId string, health types.WorkerHealth) error {
 	r.db.mu.Lock()
 	defer r.db.mu.Unlock()
 
@@ -480,7 +492,7 @@ func (r *MockWorkerSessionRepository) UpdateHeartbeat(ctx context.Context, worke
 		return errors.New("worker session not found")
 	}
 
-	session.Status = status
+	session.Health = health
 	session.LastHeartbeat = models2.Now()
 	return nil
 }

@@ -1,9 +1,32 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package models
 
 import (
 	"github.com/google/uuid"
 	"github.com/jc-lab/distworker/go/pkg/types"
+	"sync"
 )
+
+type ControllerSetting struct {
+	WorkerAccessibleBaseUrl string `yaml:"worker_accessible_base_url"`
+}
 
 // Task represents a task in the system
 type Task struct {
@@ -21,6 +44,9 @@ type Task struct {
 	CreatedAt   UnixTime               `bson:"created_at" json:"created_at"`
 	StartedAt   *UnixTime              `bson:"started_at" json:"started_at"`
 	CompletedAt *UnixTime              `bson:"completed_at" json:"completed_at"`
+	MaxRetry    int                    `bson:"max_retry" json:"max_retry"`
+	Retried     int                    `bson:"retried" json:"retried"`
+	WebhookUrl  string                 `bson:"webhook_url" json:"webhook_url"`
 }
 
 // TaskError represents an error that occurred during task execution
@@ -84,16 +110,53 @@ type QueueStats struct {
 
 // WorkerSession represents a worker session in the database
 type WorkerSession struct {
+	mutex sync.RWMutex
+
 	WorkerId string             `bson:"_id" json:"worker_id"`
-	Status   types.WorkerStatus `bson:"status" json:"status"`
+	Health   types.WorkerHealth `bson:"health" json:"health"`
 	// TODO: queues as set<string>
 	Queues          []string               `bson:"queues" json:"queues"`
-	CurrentTask     string                 `bson:"current_task,omitempty" json:"current_task,omitempty"`
+	CurrentTask     *Task                  `bson:"-"` // `bson:"current_task,omitempty" json:"current_task,omitempty"`
 	ConnectedAt     UnixTime               `bson:"connected_at" json:"connected_at"`
 	LastHeartbeat   UnixTime               `bson:"last_heartbeat" json:"last_heartbeat"`
 	ProvisionerName string                 `bson:"provisioner_name" json:"provisioner_name"`
 	ResourceInfo    map[string]interface{} `bson:"resource_info" json:"resource_info"`
 	WorkerToken     string                 `bson:"worker_token" json:"-"` // Don't expose in JSON
+}
+
+func (s *WorkerSession) ToModel() *Worker {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	m := &Worker{
+		Id:            s.WorkerId,
+		Status:        s.getStatus(),
+		Queues:        s.Queues,
+		ConnectedAt:   s.ConnectedAt,
+		LastHeartbeat: s.LastHeartbeat,
+		Provisioner:   s.ProvisionerName,
+		ResourceInfo:  s.ResourceInfo,
+	}
+	if s.CurrentTask != nil {
+		m.CurrentTask = s.CurrentTask.Id
+	}
+
+	return m
+}
+
+func (s *WorkerSession) getStatus() types.WorkerStatus {
+	switch {
+	case s.Health == types.WorkerHealthDown:
+		return types.WorkerStatusError
+	case s.Health == types.WorkerHealthDisconnected:
+		return types.WorkerStatusDisconnected
+	case s.CurrentTask != nil:
+		return types.WorkerStatusProcessing
+	case s.Health == types.WorkerHealthUp:
+		return types.WorkerStatusIdle
+	default:
+		return types.WorkerStatusError
+	}
 }
 
 // NewTaskId generates a new UUIDv7 for task ID

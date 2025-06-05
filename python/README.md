@@ -8,7 +8,6 @@ A Python SDK for connecting workers to the DistWorker distributed task processin
 - **HMAC Authentication**: Secure authentication using HMAC-SHA256 signatures
 - **Automatic Reconnection**: Built-in reconnection logic with configurable retry policies
 - **Task Progress Reporting**: Send progress updates during task execution
-- **Queue Pattern Matching**: Support for MQTT-style wildcards (* and #) in queue patterns
 - **Resource Monitoring**: Report worker resource information and usage
 - **Async/Await Support**: Fully asynchronous API using Python's asyncio
 
@@ -22,7 +21,7 @@ pip install distworker-sdk
 
 ```bash
 git clone https://github.com/jc-lab/distworker.git
-cd distworker/python-worker-sdk
+cd distworker/python
 pip install -e .
 ```
 
@@ -231,7 +230,7 @@ mypy distworker/
 
 ## License
 
-MIT License - see LICENSE file for details.
+Apache-2.0 License - see [LICENSE](./LICENSE) file for details.
 
 ## Contributing
 

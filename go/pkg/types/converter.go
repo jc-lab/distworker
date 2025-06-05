@@ -1,3 +1,21 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package types
 
 import (
@@ -26,71 +44,17 @@ func (i *WorkerStatus) UnmarshalBSONValue(t bsontype.Type, value []byte) error {
 	return nil
 }
 
-// ConvertTaskStatusFromProto converts protobuf TaskStatus to pkg TaskStatus
-func ConvertTaskStatusFromProto(protoStatus protocol.TaskStatus) TaskStatus {
+// ConvertWorkerHealthFromProto converts protobuf WorkerStatus to pkg WorkerStatus
+func ConvertWorkerHealthFromProto(protoStatus protocol.WorkerHealth) WorkerHealth {
 	switch protoStatus {
-	case protocol.TaskStatus_TASK_STATUS_PENDING:
-		return TaskStatusPending
-	case protocol.TaskStatus_TASK_STATUS_PROCESSING:
-		return TaskStatusProcessing
-	case protocol.TaskStatus_TASK_STATUS_COMPLETED:
-		return TaskStatusCompleted
-	case protocol.TaskStatus_TASK_STATUS_FAILED:
-		return TaskStatusFailed
-	case protocol.TaskStatus_TASK_STATUS_CANCELLED:
-		return TaskStatusCancelled
+	case protocol.WorkerHealth_WORKER_HEALTH_UP:
+		return WorkerHealthUp
+	case protocol.WorkerHealth_WORKER_HEALTH_DOWN:
+		return WorkerHealthDown
+	case protocol.WorkerHealth_WORKER_HEALTH_WARN:
+		return WorkerHealthWarning
 	default:
-		return TaskStatusPending
-	}
-}
-
-// ConvertTaskStatusToProto converts pkg TaskStatus to protobuf TaskStatus
-func ConvertTaskStatusToProto(status TaskStatus) protocol.TaskStatus {
-	switch status {
-	case TaskStatusPending:
-		return protocol.TaskStatus_TASK_STATUS_PENDING
-	case TaskStatusProcessing:
-		return protocol.TaskStatus_TASK_STATUS_PROCESSING
-	case TaskStatusCompleted:
-		return protocol.TaskStatus_TASK_STATUS_COMPLETED
-	case TaskStatusFailed:
-		return protocol.TaskStatus_TASK_STATUS_FAILED
-	case TaskStatusCancelled:
-		return protocol.TaskStatus_TASK_STATUS_CANCELLED
-	default:
-		return protocol.TaskStatus_TASK_STATUS_PENDING
-	}
-}
-
-// ConvertWorkerStatusFromProto converts protobuf WorkerStatus to pkg WorkerStatus
-func ConvertWorkerStatusFromProto(protoStatus protocol.WorkerStatus) WorkerStatus {
-	switch protoStatus {
-	case protocol.WorkerStatus_WORKER_STATUS_IDLE:
-		return WorkerStatusIdle
-	case protocol.WorkerStatus_WORKER_STATUS_PROCESSING:
-		return WorkerStatusProcessing
-	case protocol.WorkerStatus_WORKER_STATUS_DISCONNECTING:
-		return WorkerStatusDisconnecting
-	case protocol.WorkerStatus_WORKER_STATUS_ERROR:
-		return WorkerStatusError
-	default:
-		return WorkerStatusIdle
-	}
-}
-
-// ConvertWorkerStatusToProto converts pkg WorkerStatus to protobuf WorkerStatus
-func ConvertWorkerStatusToProto(status WorkerStatus) protocol.WorkerStatus {
-	switch status {
-	case WorkerStatusIdle:
-		return protocol.WorkerStatus_WORKER_STATUS_IDLE
-	case WorkerStatusProcessing:
-		return protocol.WorkerStatus_WORKER_STATUS_PROCESSING
-	case WorkerStatusDisconnecting:
-		return protocol.WorkerStatus_WORKER_STATUS_DISCONNECTING
-	case WorkerStatusError:
-		return protocol.WorkerStatus_WORKER_STATUS_ERROR
-	default:
-		return protocol.WorkerStatus_WORKER_STATUS_IDLE
+		return WorkerHealthUnknown
 	}
 }
 

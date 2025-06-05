@@ -1,3 +1,21 @@
+// distworker
+// Copyright (C) 2025 JC-Lab
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package database
 
 import (
@@ -41,8 +59,10 @@ type TaskRepositoryInterface interface {
 	// List retrieves tasks with pagination and filters
 	List(ctx context.Context, filter TaskFilter, page, limit int) ([]*models.Task, int64, error)
 
-	// GetPendingTasks retrieves pending tasks for a queue
-	GetPendingTasks(ctx context.Context, queue string, limit int) ([]*models.Task, error)
+	Stat(ctx context.Context) (*TaskCollectionStat, error)
+
+	// ListAll retrieves tasks with pagination and filters
+	ListAll(ctx context.Context, filter TaskFilter) (chan *models.Task, error)
 }
 
 // QueueRepositoryInterface defines the interface for queue database operations
@@ -81,12 +101,13 @@ type WorkerSessionRepositoryInterface interface {
 	List(ctx context.Context) ([]*models.WorkerSession, error)
 
 	// UpdateHeartbeat updates the last heartbeat time for a worker
-	UpdateHeartbeat(ctx context.Context, workerId string, status types.WorkerStatus) error
+	UpdateHeartbeat(ctx context.Context, workerId string, health types.WorkerHealth) error
 }
 
 // TaskFilter represents filters for task queries
 type TaskFilter struct {
-	Queue    string
-	Status   string
-	WorkerId string
+	Queue     string
+	StatusGte types.TaskStatus
+	StatusLt  types.TaskStatus
+	WorkerId  string
 }

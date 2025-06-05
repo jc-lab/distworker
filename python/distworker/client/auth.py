@@ -13,7 +13,6 @@ WS_SIGNING_KEY_DATA = "distworker1_websocket"
 DATE_FORMAT = "%Y%m%dT%H%M%SZ"
 DATE_ONLY_FORMAT = "%Y%m%d"
 
-
 class ValidateContext:
     def __init__(self):
         self.worker_id: str = ""
