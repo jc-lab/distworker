@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "distworker-sdk"
-version = "0.0.2-rc1"
+version = "{{VERSION_PLACEHOLDER}}"
 authors = [
     {name = "JC-Lab", email = "joseph@jc-lab.net"},
 ]

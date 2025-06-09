@@ -1,4 +1,4 @@
-FROM scratch
+FROM alpine:3.21
 
 ARG DAEMON_NAME="controller"
 ARG DIST_FILE=""
