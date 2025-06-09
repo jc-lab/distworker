@@ -14,6 +14,7 @@ jobs:
       name: pypi
       url: https://pypi.org/p/distworker-sdk
     permissions:
+      contents: read
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     
     steps:
