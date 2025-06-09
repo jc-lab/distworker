@@ -89,6 +89,8 @@ spec:
           env:
             - name: DISTWORKER_DEBUG
               value: {{ ternary "true" "false" (or $controller.image.debug $controller.diagnosticMode.enabled) | quote }}
+            - name: DISTWORKER_CONFIG
+              value: "/mnt/config/config.yaml"
             - name: DISTWORKER_SERVER_ID
               valueFrom:
                 configMapKeyRef:
@@ -108,10 +110,17 @@ spec:
             - name: DISTWORKER_DATABASE_MONGODB_URI
               valueFrom:
                 secretKeyRef:
-                  name: {{ $credentialSecretName }}
+                  name: {{ $credentialSecretName | quote }}
                   key: mongodb-uri
             - name: DISTWORKER_DATABASE_MONGODB_DATABASE
               value: {{ .Values.database.mongodb.database | quote }}
+            {{- end }}
+            {{- range $key, $val := .Values.controller.secretEnvs }}
+            - name: {{ $key | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credentialSecretName | quote }}
+                  key: {{ printf "CONTROLLER_%s" $key | quote }}
             {{- end }}
             {{- if $controller.extraEnvVars }}
             {{- include "common.tplvalues.render" (dict "value" $controller.extraEnvVars "context" $) | nindent 12 }}
@@ -162,6 +171,8 @@ spec:
           volumeMounts:
             - name: files
               mountPath: "/mnt/files"
+            - name: config
+              mountPath: "/mnt/config"
             {{- if $controller.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" $controller.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
@@ -171,6 +182,9 @@ spec:
       volumes:
         - name: files
           emptyDir: {}
+        - name: config
+          configMap:
+            name: {{ $configMapName | quote }}
         {{- if $controller.extraVolumes }}
         {{- include "common.tplvalues.render" (dict "value" $controller.extraVolumes "context" $) | nindent 8 }}
         {{- end }}
