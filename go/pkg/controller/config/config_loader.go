@@ -20,53 +20,9 @@ package config
 
 import (
 	"fmt"
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/jc-lab/distworker/go/internal/storage"
-	"os"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
-
-// LoadConfig loads configuration from YAML file
-func LoadConfig(configPath string) (*Config, error) {
-	// Read config file
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	// Parse YAML
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config YAML: %w", err)
-	}
-
-	// Set defaults
-	setDefaults(&config)
-
-	// Validate config
-	if err := validateConfig(&config); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
-	}
-
-	return &config, nil
-}
-
-func ReadDynamicField(input interface{}, target interface{}) error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:  target,
-		TagName: "yaml",
-	})
-	if err != nil {
-		return err
-	}
-	if err := decoder.Decode(input); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 // setDefaults sets default values for configuration
 func setDefaults(config *Config) {

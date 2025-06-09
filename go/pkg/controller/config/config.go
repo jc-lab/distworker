@@ -19,43 +19,68 @@
 package config
 
 import (
+	"fmt"
 	"github.com/jc-lab/distworker/go/pkg/models"
+	"github.com/knadh/koanf/v2"
 	"gopkg.in/yaml.v3"
 	"time"
 )
 
 // Config represents the controller configuration
 type Config struct {
-	Server            ServerConfig             `yaml:"server"`
-	Database          DatabaseConfig           `yaml:"database"`
-	Storage           StorageConfig            `yaml:"storage"`
-	Queues            []QueueConfig            `yaml:"queues"`
-	Provisioner       ProvisionerConfig        `yaml:"provisioner"`
-	ControllerSetting models.ControllerSetting `yaml:"controller_setting"`
+	Server            ServerConfig             `koanf:"server"`
+	Database          DatabaseConfig           `koanf:"database"`
+	Storage           StorageConfig            `koanf:"storage"`
+	Queues            []QueueConfig            `koanf:"queues"`
+	Provisioner       ProvisionerConfig        `koanf:"provisioner"`
+	ControllerSetting models.ControllerSetting `koanf:"controller_setting"`
+
+	k *koanf.Koanf
+}
+
+func (c *Config) Load(k *koanf.Koanf) error {
+	c.k = k
+	if err := k.Unmarshal("", c); err != nil {
+		return err
+	}
+
+	// Set defaults
+	setDefaults(c)
+
+	// Validate config
+	if err := validateConfig(c); err != nil {
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Config) ReadDynamicField(key string, out interface{}) error {
+	return c.k.Unmarshal(key, out)
 }
 
 // ServerConfig represents server configuration
 type ServerConfig struct {
-	Id     string       `yaml:"id"`
-	API    APIConfig    `yaml:"api"`
-	Worker WorkerConfig `yaml:"worker"`
+	Id     string       `koanf:"id"`
+	API    APIConfig    `koanf:"api"`
+	Worker WorkerConfig `koanf:"worker"`
 }
 
 // APIConfig represents API server configuration
 type APIConfig struct {
-	Port int `yaml:"port"`
+	Port int `koanf:"port"`
 }
 
 // WorkerConfig represents worker server configuration
 type WorkerConfig struct {
-	Port              int    `yaml:"port"`
-	AccessibleBaseUrl string `yaml:"accessible_base_url"`
+	Port              int    `koanf:"port"`
+	AccessibleBaseUrl string `koanf:"accessible_base_url"`
 }
 
 // DatabaseConfig represents database configuration
 type DatabaseConfig struct {
-	Type  string                 `yaml:"type"`
-	Other map[string]interface{} `yaml:"-"`
+	Type  string                 `koanf:"type"`
+	Other map[string]interface{} `koanf:"-"`
 }
 
 func (c *DatabaseConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -85,8 +110,8 @@ func (c *DatabaseConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // StorageConfig represents storage configuration
 type StorageConfig struct {
-	Type  string                 `yaml:"type"`
-	Other map[string]interface{} `yaml:"-"`
+	Type  string                 `koanf:"type"`
+	Other map[string]interface{} `koanf:"-"`
 
 	// s3
 	// local
@@ -119,8 +144,8 @@ func (c *StorageConfig) UnmarshalYAML(value *yaml.Node) error {
 
 // QueueConfig represents queue configuration
 type QueueConfig struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name        string `koanf:"name"`
+	Description string `koanf:"description"`
 }
 
 // ProvisionerConfig represents provisioner configuration map
@@ -139,39 +164,39 @@ const (
 
 // ProvisionerSettings represents individual provisioner settings
 type ProvisionerSettings struct {
-	Type ProvisionerType `yaml:"type"`
+	Type ProvisionerType `koanf:"type"`
 
 	// Token is available in Type is ProvisionerTypeNone
-	Token string `yaml:"token,omitempty"`
+	Token string `koanf:"token,omitempty"`
 
 	// URL is available in Type is ProvisionerTypeUrl
-	URL string `yaml:"url,omitempty"`
+	URL string `koanf:"url,omitempty"`
 
 	// Command is available in Type is ProvisionerTypeCommand
 	Command *struct {
-		WorkingDirectory string            `yaml:"working_directory"`
-		Command          []string          `yaml:"command"`
-		Envs             map[string]string `yaml:"envs"`
+		WorkingDirectory string            `koanf:"working_directory"`
+		Command          []string          `koanf:"command"`
+		Envs             map[string]string `koanf:"envs"`
 		// for python
-		Venv string `yaml:"venv"`
-	} `yaml:"command,omitempty"`
+		Venv string `koanf:"venv"`
+	} `koanf:"command,omitempty"`
 
-	Queues       []string               `yaml:"queues"`
-	Worker       WorkerSettings         `yaml:"worker"`
-	ReadyTimeout time.Duration          `yaml:"ready_timeout"`
-	Autoscale    AutoScaleSettings      `yaml:"autoscale"`
-	Parameters   map[string]interface{} `yaml:"parameters,omitempty"`
+	Queues       []string               `koanf:"queues"`
+	Worker       WorkerSettings         `koanf:"worker"`
+	ReadyTimeout time.Duration          `koanf:"ready_timeout"`
+	Autoscale    AutoScaleSettings      `koanf:"autoscale"`
+	Parameters   map[string]interface{} `koanf:"parameters,omitempty"`
 }
 
 // WorkerSettings represents worker settings for provisioner
 type WorkerSettings struct {
-	MaxTaskDuration time.Duration `yaml:"max_task_duration"`
+	MaxTaskDuration time.Duration `koanf:"max_task_duration"`
 }
 
 // AutoScaleSettings represents worker settings for provisioner
 type AutoScaleSettings struct {
-	Min         int           `yaml:"min"`
-	Max         int           `yaml:"max"`
-	IdleTimeout time.Duration `yaml:"idle_timeout"`
-	UpLatency   time.Duration `yaml:"up_latency"`
+	Min         int           `koanf:"min"`
+	Max         int           `koanf:"max"`
+	IdleTimeout time.Duration `koanf:"idle_timeout"`
+	UpLatency   time.Duration `koanf:"up_latency"`
 }

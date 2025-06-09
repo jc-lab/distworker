@@ -22,21 +22,40 @@ import (
 	"flag"
 	controller2 "github.com/jc-lab/distworker/go/pkg/controller"
 	config2 "github.com/jc-lab/distworker/go/pkg/controller/config"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
+
+var k = koanf.New(".")
 
 func main() {
 	var configPath string
 	flag.StringVar(&configPath, "config", os.Getenv("DISTWORKER_CONFIG"), "DISTWORKER_CONFIG path to config file")
 	flag.Parse()
 
-	// Load configuration
-	config, err := config2.LoadConfig(configPath)
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+	if configPath != "" {
+		if err := k.Load(file.Provider(configPath), yaml.Parser()); err != nil {
+			log.Fatalf("Error loading config from file: %v", err)
+		}
+	}
+
+	if err := k.Load(env.Provider("DISTWORKER_", ".", func(s string) string {
+		return strings.Replace(strings.ToLower(
+			strings.TrimPrefix(s, "DISTWORKER_")), "_", ".", -1)
+	}), nil); err != nil {
+		log.Fatalf("Error loading config from env: %v", err)
+	}
+
+	config := &config2.Config{}
+	if err := config.Load(k); err != nil {
+		log.Fatalf("Error loading config: %v", err)
 	}
 
 	log.Printf("Starting distworker controller (server Id: %s)", config.Server.Id)

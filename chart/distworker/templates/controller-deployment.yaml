@@ -1,0 +1,176 @@
+{{- $controller := .Values.controller -}}
+{{- $credentialSecretName := include "distworker.credentials-secret-name" . -}}
+{{- $configMapName := include "distworker.config-map-name" . -}}
+apiVersion: {{ include "common.capabilities.deployment.apiVersion" . }}
+kind: Deployment
+metadata:
+  name: {{ printf "%s-controller" (include "common.names.fullname" .) }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+    {{- if .Values.commonLabels }}
+    {{- include "common.tplvalues.render" ( dict "value" .Values.commonLabels "context" $ ) | nindent 4 }}
+    {{- end }}
+  {{- if .Values.commonAnnotations }}
+  annotations: {{- include "common.tplvalues.render" ( dict "value" .Values.commonAnnotations "context" $ ) | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ $controller.replicaCount }}
+  {{- if $controller.updateStrategy }}
+  strategy: {{- toYaml $controller.updateStrategy | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "common.labels.matchLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      {{- if $controller.podAnnotations }}
+      annotations: {{- include "common.tplvalues.render" (dict "value" $controller.podAnnotations "context" $) | nindent 8 }}
+      {{- end }}
+      labels: {{- include "common.labels.standard" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+        {{- if $controller.podLabels }}
+        {{- include "common.tplvalues.render" (dict "value" $controller.podLabels "context" $) | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ template "distworker.serviceAccountName" . }}
+      {{- include "distworker.controller.imagePullSecrets" . | nindent 6 }}
+      {{- if $controller.hostAliases }}
+      hostAliases: {{- include "common.tplvalues.render" (dict "value" $controller.hostAliases "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if $controller.affinity }}
+      affinity: {{- include "common.tplvalues.render" ( dict "value" $controller.affinity "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if $controller.nodeSelector }}
+      nodeSelector: {{- include "common.tplvalues.render" ( dict "value" $controller.nodeSelector "context" $) | nindent 8 }}
+      {{- end }}
+      {{- if $controller.tolerations }}
+      tolerations: {{- include "common.tplvalues.render" (dict "value" $controller.tolerations "context" .) | nindent 8 }}
+      {{- end }}
+      {{- if $controller.priorityClassName }}
+      priorityClassName: {{ $controller.priorityClassName | quote }}
+      {{- end }}
+      {{- if $controller.schedulerName }}
+      schedulerName: {{ $controller.schedulerName | quote }}
+      {{- end }}
+      {{- if $controller.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- include "common.tplvalues.render" (dict "value" $controller.topologySpreadConstraints "context" .) | nindent 8 }}
+      {{- end }}
+      {{- if $controller.podSecurityContext.enabled }}
+      securityContext: {{- omit $controller.podSecurityContext "enabled" | toYaml | nindent 8 }}
+      {{- end }}
+      {{- if $controller.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ $controller.terminationGracePeriodSeconds }}
+      {{- end }}
+      {{- if $controller.initContainers }}
+      initContainers:
+        {{- include "common.tplvalues.render" (dict "value" $controller.initContainers "context" $) | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: main
+          image: {{ template "distworker.controller.image" . }}
+          imagePullPolicy: {{ $controller.image.pullPolicy }}
+          {{- if $controller.containerSecurityContext.enabled }}
+          securityContext: {{- omit $controller.containerSecurityContext "enabled" | toYaml | nindent 12 }}
+          {{- end }}
+          {{- if $controller.diagnosticMode.enabled }}
+          command: {{- include "common.tplvalues.render" (dict "value" $controller.diagnosticMode.command "context" $) | nindent 12 }}
+          {{- else if $controller.command }}
+          command: {{- include "common.tplvalues.render" (dict "value" $controller.command "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if $controller.diagnosticMode.enabled }}
+          args: {{- include "common.tplvalues.render" (dict "value" $controller.diagnosticMode.args "context" $) | nindent 12 }}
+          {{- else if $controller.args }}
+          args: {{- include "common.tplvalues.render" (dict "value" $controller.args "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if $controller.args }}
+          args: {{- include "common.tplvalues.render" (dict "value" $controller.args "context" $) | nindent 12 }}
+          {{- end }}
+          env:
+            - name: DISTWORKER_DEBUG
+              value: {{ ternary "true" "false" (or $controller.image.debug $controller.diagnosticMode.enabled) | quote }}
+            - name: DISTWORKER_SERVER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $configMapName | quote }}
+                  key: server-id
+            - name: DISTWORKER_SERVER_API_PORT
+              value: {{ $controller.containerPorts.api | quote }}
+            - name: DISTWORKER_SERVER_WORKER_PORT
+              value: {{ $controller.containerPorts.worker | quote }}
+            {{- if .Values.workerAccessibleBaseUrl }}
+            - name: DISTWORKER_SERVER_WORKER_ACCESSIBLE_BASE_URL
+              value: {{ .Values.workerAccessibleBaseUrl | quote }}
+            {{- end }}
+            - name: DISTWORKER_DATABASE_TYPE
+              value: {{ .Values.database.type | quote }}
+            {{- if eq .Values.database.type "mongodb" }}
+            - name: DISTWORKER_DATABASE_MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credentialSecretName }}
+                  key: mongodb-uri
+            - name: DISTWORKER_DATABASE_MONGODB_DATABASE
+              value: {{ .Values.database.mongodb.database | quote }}
+            {{- end }}
+            {{- if $controller.extraEnvVars }}
+            {{- include "common.tplvalues.render" (dict "value" $controller.extraEnvVars "context" $) | nindent 12 }}
+            {{- end }}
+          envFrom:
+            {{- if $controller.extraEnvVarsCM }}
+            - configMapRef:
+                name: {{ include "common.tplvalues.render" (dict "value" $controller.extraEnvVarsCM "context" $) }}
+            {{- end }}
+            {{- if $controller.extraEnvVarsSecret }}
+            - secretRef:
+                name: {{ include "common.tplvalues.render" (dict "value" $controller.extraEnvVarsSecret "context" $) }}
+            {{- end }}
+          {{- if $controller.resources }}
+          resources: {{- toYaml $controller.resources | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: api
+              protocol: TCP
+              containerPort: {{ $controller.containerPorts.api }}
+            - name: worker-api
+              protocol: TCP
+              containerPort: {{ $controller.containerPorts.worker }}
+          {{- if not $controller.diagnosticMode.enabled }}
+          {{- if $controller.livenessProbe.enabled }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" (omit $controller.livenessProbe "enabled") "context" $) | nindent 12 }}
+            httpGet:
+              path: /api/v1/health
+              port: api
+              scheme: HTTP
+          {{- else if $controller.customLivenessProbe }}
+          livenessProbe: {{- include "common.tplvalues.render" (dict "value" $controller.customLivenessProbe "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if $controller.readinessProbe.enabled }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" (omit $controller.readinessProbe "enabled") "context" $) | nindent 12 }}
+          {{- else if $controller.customReadinessProbe }}
+          readinessProbe: {{- include "common.tplvalues.render" (dict "value" $controller.customReadinessProbe "context" $) | nindent 12 }}
+          {{- end }}
+          {{- if $controller.startupProbe.enabled }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" (omit $controller.startupProbe "enabled") "context" $) | nindent 12 }}
+          {{- else if $controller.customStartupProbe }}
+          startupProbe: {{- include "common.tplvalues.render" (dict "value" $controller.customStartupProbe "context" $) | nindent 12 }}
+          {{- end }}
+          {{- end }}
+          {{- if $controller.lifecycleHooks }}
+          lifecycle: {{- include "common.tplvalues.render" (dict "value" $controller.lifecycleHooks "context" $) | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: files
+              mountPath: "/mnt/files"
+            {{- if $controller.extraVolumeMounts }}
+            {{- include "common.tplvalues.render" (dict "value" $controller.extraVolumeMounts "context" $) | nindent 12 }}
+            {{- end }}
+        {{- if $controller.sidecars }}
+        {{- include "common.tplvalues.render" ( dict "value" $controller.sidecars "context" $) | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: files
+          emptyDir: {}
+        {{- if $controller.extraVolumes }}
+        {{- include "common.tplvalues.render" (dict "value" $controller.extraVolumes "context" $) | nindent 8 }}
+        {{- end }}

@@ -27,7 +27,7 @@ import (
 func useMongodb(cfg *config.Config, server *Server) error {
 	dbConfig := &mongodbrepo2.MongoDBConfig{}
 
-	if err := config.ReadDynamicField(cfg.Database.Other[mongodbrepo2.DatabaseType], dbConfig); err != nil {
+	if err := cfg.ReadDynamicField("database."+mongodbrepo2.DatabaseType, dbConfig); err != nil {
 		return err
 	}
 

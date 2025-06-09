@@ -44,7 +44,7 @@ func defaultStorage(cfg *config.Config, server *Server) error {
 	case storage2.TypeLocal:
 		localConfig := &storage2.LocalConfig{}
 
-		if err := config.ReadDynamicField(cfg.Storage.Other[storage2.TypeLocal], localConfig); err != nil {
+		if err := cfg.ReadDynamicField("storage."+storage2.TypeLocal, localConfig); err != nil {
 			return err
 		}
 
@@ -53,7 +53,7 @@ func defaultStorage(cfg *config.Config, server *Server) error {
 	case storage2.TypeS3:
 		s3Config := &storage2.S3Config{}
 
-		if err := config.ReadDynamicField(cfg.Storage.Other[storage2.TypeS3], s3Config); err != nil {
+		if err := cfg.ReadDynamicField("storage."+storage2.TypeS3, s3Config); err != nil {
 			return err
 		}
 
