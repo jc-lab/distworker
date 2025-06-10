@@ -58,7 +58,7 @@ func (p *Base) IsGrowable(taskDelay time.Duration) bool {
 	if p.Type == config.ProvisionerTypeNone {
 		return false
 	}
-	return int(p.CurrentWorkers.Load()) < p.Autoscale.Max && p.Autoscale.UpLatency <= taskDelay
+	return int(p.CurrentWorkers.Load()) < p.Autoscale.Max && (p.Autoscale.UpLatency <= taskDelay || p.CurrentWorkers.Load() == 0)
 }
 
 func (p *Base) Grow(ctx context.Context) (worker.Connection, error) {
