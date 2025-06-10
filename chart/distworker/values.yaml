@@ -1,0 +1,623 @@
+global:
+  clusterDomain: cluster.local
+
+## Enable diagnostic mode in the deployment
+##
+diagnosticMode:
+  ## @param diagnosticMode.enabled Enable diagnostic mode (all probes will be disabled and the command will be overridden)
+  ##
+  enabled: false
+  ## @param diagnosticMode.command Command to override all containers in the deployment
+  ##
+  command:
+    - sleep
+  ## @param diagnosticMode.args Args to override all containers in the deployment
+  ##
+  args:
+    - infinity
+
+## @section Common parameters
+
+## @param kubeVersion Override Kubernetes version
+##
+kubeVersion: ''
+## @param nameOverride String to partially override common.names.name
+##
+nameOverride: ''
+## @param fullnameOverride String to fully override common.names.fullname
+##
+fullnameOverride: ''
+## @param namespaceOverride String to fully override common.names.namespace
+##
+namespaceOverride: ''
+## @param commonLabels Labels to add to all deployed objects
+##
+commonLabels: {}
+## @param commonAnnotations Annotations to add to all deployed objects
+##
+commonAnnotations: {}
+## @param clusterDomain Kubernetes cluster domain name
+##
+clusterDomain: cluster.local
+## @param extraDeploy Array of extra objects to deploy with the release
+##
+extraDeploy: []
+
+imageRegistry: ghcr.io
+
+serviceAccount:
+  ## @param serviceAccount.create Enable creation of ServiceAccount for ZooKeeper pod
+  ##
+  create: false
+  ## @param serviceAccount.name The name of the ServiceAccount to use.
+  ## If not set and create is true, a name is generated using the common.names.fullname template
+  ##
+  name: ''
+  ## @param serviceAccount.automountServiceAccountToken Allows auto mount of ServiceAccountToken on the serviceAccount created
+  ## Can be set to false if pods using this serviceAccount do not need to use K8s API
+  ##
+  automountServiceAccountToken: true
+  ## @param serviceAccount.annotations Additional custom annotations for the ServiceAccount
+  ##
+  annotations: {}
+
+workerAccessibleBaseUrl: "" # e.g. "https://distworker.example.com:8081"
+
+server:
+  id: "" # SERVER UUID
+
+## @section Database configuration
+database:
+  ## @param database.type Database type (mongodb)
+  type: mongodb
+  mongodb:
+    ## @param database.mongodb.uri MongoDB uri
+    uri: "mongodb://username:password@host:27017/?authSource=admin"
+    ## @param database.mongodb.database MongoDB database name
+    database: "distworker"
+
+controller:
+  image:
+    registry: ghcr.io
+    repository: jc-lab/distworker
+    tag: "" # app version
+    digest: ''
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+    debug: false
+
+  configYaml:
+    storage:
+      type: "local"  # s3 | local
+      s3:
+        # url: ""
+        region: "us-east-1"
+        # bucket: "distworker-files"
+      local:
+        path: "/mnt/files"
+    queues: []
+    #  - name: "example/hello"
+    #    description: "test queue 1"
+    provisioner: {}
+
+  secretEnvs: {}
+
+  ## Enable diagnostic mode in the deployment
+  ##
+  diagnosticMode:
+    ## @param diagnosticMode.enabled Enable diagnostic mode (all probes will be disabled and the command will be overridden)
+    ##
+    enabled: false
+    ## @param diagnosticMode.command Command to override all containers in the deployment
+    ##
+    command:
+      - sleep
+    ## @param diagnosticMode.args Args to override all containers in the deployment
+    ##
+    args:
+      - infinity
+
+  containerPorts:
+    api: 8081
+    worker: 8081
+
+  ## @param notificationService.replicaCount Number of main replicas to deploy
+  ##
+  replicaCount: 1
+  ## Configure extra options for main containers' liveness and readiness probes
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/#configure-probes
+  ## @param notificationService.livenessProbe.enabled Enable livenessProbe on main containers
+  ## @param notificationService.livenessProbe.initialDelaySeconds Initial delay seconds for livenessProbe
+  ## @param notificationService.livenessProbe.periodSeconds Period seconds for livenessProbe
+  ## @param notificationService.livenessProbe.timeoutSeconds Timeout seconds for livenessProbe
+  ## @param notificationService.livenessProbe.failureThreshold Failure threshold for livenessProbe
+  ## @param notificationService.livenessProbe.successThreshold Success threshold for livenessProbe
+  ##
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 25
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 3
+    successThreshold: 1
+  ## @param notificationService.readinessProbe.enabled Enable readinessProbe on main containers
+  ## @param notificationService.readinessProbe.initialDelaySeconds Initial delay seconds for readinessProbe
+  ## @param notificationService.readinessProbe.periodSeconds Period seconds for readinessProbe
+  ## @param notificationService.readinessProbe.timeoutSeconds Timeout seconds for readinessProbe
+  ## @param notificationService.readinessProbe.failureThreshold Failure threshold for readinessProbe
+  ## @param notificationService.readinessProbe.successThreshold Success threshold for readinessProbe
+  ##
+  readinessProbe:
+    enabled: false
+    initialDelaySeconds: foo
+    periodSeconds: bar
+    timeoutSeconds: foo
+    failureThreshold: bar
+    successThreshold: foo
+  ## @param notificationService.startupProbe.enabled Enable startupProbe on main containers
+  ## @param notificationService.startupProbe.initialDelaySeconds Initial delay seconds for startupProbe
+  ## @param notificationService.startupProbe.periodSeconds Period seconds for startupProbe
+  ## @param notificationService.startupProbe.timeoutSeconds Timeout seconds for startupProbe
+  ## @param notificationService.startupProbe.failureThreshold Failure threshold for startupProbe
+  ## @param notificationService.startupProbe.successThreshold Success threshold for startupProbe
+  ##
+  startupProbe:
+    enabled: false
+    initialDelaySeconds: foo
+    periodSeconds: bar
+    timeoutSeconds: foo
+    failureThreshold: bar
+    successThreshold: foo
+  ## @param notificationService.customLivenessProbe Custom livenessProbe that overrides the default one
+  ##
+  customLivenessProbe: {}
+  ## @param notificationService.customReadinessProbe Custom readinessProbe that overrides the default one
+  ##
+  customReadinessProbe: {}
+  ## @param notificationService.customStartupProbe Custom startupProbe that overrides the default one
+  ##
+  customStartupProbe: {}
+  ## main resource requests and limits
+  ## ref: http://kubernetes.io/docs/user-guide/compute-resources/
+  ## @param notificationService.resources.limits The resources limits for the main containers
+  ## @param notificationService.resources.requests The requested resources for the main containers
+  ##
+  resources:
+    limits: {}
+    requests:
+      memory: '256Mi'
+      cpu: '500m'
+  ## Configure Pods Security Context
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+  ## @param notificationService.podSecurityContext.enabled Enabled main pods' Security Context
+  ## @param notificationService.podSecurityContext.fsGroup Set main pod's Security Context fsGroup
+  ##
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+  ## Configure Container Security Context
+  ## ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+  ## @param notificationService.containerSecurityContext.enabled Enabled main containers' Security Context
+  ## @param notificationService.containerSecurityContext.runAsUser Set main containers' Security Context runAsUser
+  ## @param notificationService.containerSecurityContext.runAsNonRoot Set main containers' Security Context runAsNonRoot
+  ## @param notificationService.containerSecurityContext.readOnlyRootFilesystem Set main containers' Security Context runAsNonRoot
+  ##
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+
+  ## @param notificationService.existingConfigmap The name of an existing ConfigMap with your custom configuration for main
+  ##
+  existingConfigmap:
+  ## @param notificationService.command Override default container command (useful when using custom images)
+  ##
+  command: []
+  ## @param notificationService.args Override default container args (useful when using custom images)
+  ##
+  args: []
+  ## @param notificationService.hostAliases main pods host aliases
+  ## https://kubernetes.io/docs/concepts/services-networking/add-entries-to-pod-etc-hosts-with-host-aliases/
+  ##
+  hostAliases: []
+  ## @param notificationService.podLabels Extra labels for main pods
+  ## ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+  ##
+  podLabels: {}
+  ## @param notificationService.podAnnotations Annotations for main pods
+  ## ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
+  ##
+  podAnnotations: {}
+  ## Pod Disruption Budget configuration
+  ## ref: https://kubernetes.io/docs/tasks/run-application/configure-pdb
+  ## @param notificationService.pdb.create Enable/disable a Pod Disruption Budget creation
+  ## @param notificationService.pdb.minAvailable Minimum number/percentage of pods that should remain scheduled
+  ## @param notificationService.pdb.maxUnavailable Maximum number/percentage of pods that may be made unavailable
+  ##
+  pdb:
+    create: false
+    minAvailable: 1
+    maxUnavailable: ''
+  ## Autoscaling configuration
+  ## ref: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
+  ## @param notificationService.autoscaling.enabled Enable autoscaling for notificationService
+  ## @param notificationService.autoscaling.minReplicas Minimum number of notificationService replicas
+  ## @param notificationService.autoscaling.maxReplicas Maximum number of notificationService replicas
+  ## @param notificationService.autoscaling.targetCPU Target CPU utilization percentage
+  ## @param notificationService.autoscaling.targetMemory Target Memory utilization percentage
+  ##
+  autoscaling:
+    enabled: false
+    minReplicas: ''
+    maxReplicas: ''
+    targetCPU: ''
+    targetMemory: ''
+  ## @param notificationService.affinity Affinity for main pods assignment
+  ## ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+  ## NOTE: `notificationService.podAffinityPreset`, `notificationService.podAntiAffinityPreset`, and `notificationService.nodeAffinityPreset` will be ignored when it's set
+  ##
+  affinity: {}
+  ## @param notificationService.nodeSelector Node labels for main pods assignment
+  ## ref: https://kubernetes.io/docs/user-guide/node-selection/
+  ##
+  nodeSelector: {}
+  ## @param notificationService.tolerations Tolerations for main pods assignment
+  ## ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+  ##
+  tolerations: []
+  ## @param notificationService.updateStrategy.type main statefulset strategy type
+  ## ref: https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#update-strategies
+  ##
+  updateStrategy:
+    ## StrategyType
+    ## Can be set to RollingUpdate or OnDelete
+    ##
+    type: RollingUpdate
+
+  ## ONLY FOR STATEFULSETS
+  ## @param notificationService.podManagementPolicy Statefulset Pod management policy, it needs to be Parallel to be able to complete the cluster join
+  ## Ref: https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/#pod-management-policies
+  ##
+  podManagementPolicy: OrderedReady
+
+  ## @param notificationService.priorityClassName main pods' priorityClassName
+  ##
+  priorityClassName: ''
+  ## @param notificationService.topologySpreadConstraints Topology Spread Constraints for pod assignment spread across your cluster among failure-domains. Evaluated as a template
+  ## Ref: https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/#spread-constraints-for-pods
+  ##
+  topologySpreadConstraints: []
+  ## @param notificationService.schedulerName Name of the k8s scheduler (other than default) for main pods
+  ## ref: https://kubernetes.io/docs/tasks/administer-cluster/configure-multiple-schedulers/
+  ##
+  schedulerName: ''
+  ## @param notificationService.terminationGracePeriodSeconds Seconds Redmine pod needs to terminate gracefully
+  ## ref: https://kubernetes.io/docs/concepts/workloads/pods/pod/#termination-of-pods
+  ##
+  terminationGracePeriodSeconds: ''
+  ## @param notificationService.lifecycleHooks for the main container(s) to automate configuration before or after startup
+  ##
+  lifecycleHooks: {}
+  ## @param notificationService.extraEnvVars Array with extra environment variables to add to main nodes
+  ## e.g:
+  ## extraEnvVars:
+  ##   - name: FOO
+  ##     value: "bar"
+  ##
+  extraEnvVars: []
+  ## @param notificationService.extraEnvVarsCM Name of existing ConfigMap containing extra env vars for main nodes
+  ##
+  extraEnvVarsCM: ''
+  ## @param notificationService.extraEnvVarsSecret Name of existing Secret containing extra env vars for main nodes
+  ##
+  extraEnvVarsSecret: ''
+  ## @param notificationService.extraVolumes Optionally specify extra list of additional volumes for the main pod(s)
+  ##
+  extraVolumes: []
+  ## @param notificationService.extraVolumeMounts Optionally specify extra list of additional volumeMounts for the main container(s)
+  ##
+  extraVolumeMounts: []
+  ## @param notificationService.sidecars Add additional sidecar containers to the main pod(s)
+  ## e.g:
+  ## sidecars:
+  ##   - name: your-image-name
+  ##     image: your-image
+  ##     imagePullPolicy: Always
+  ##     ports:
+  ##       - name: portname
+  ##         containerPort: 1234
+  ##
+  sidecars: []
+  ## @param notificationService.initContainers Add additional init containers to the main pod(s)
+  ## ref: https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+  ## e.g:
+  ## initContainers:
+  ##  - name: your-image-name
+  ##    image: your-image
+  ##    imagePullPolicy: Always
+  ##    command: ['sh', '-c', 'echo "hello world"']
+  ##
+  initContainers: []
+
+  ## api service parameters
+  ##
+  service:
+    ## @param service.type notificationService service type
+    ##
+    type: ClusterIP
+
+    ports:
+      api: 8080
+
+    ## @param service.clusterIP notificationService service Cluster IP
+    ## e.g.:
+    ## clusterIP: None
+    ##
+    clusterIP: ''
+    ## @param service.externalIPs Specify the externalIP value ClusterIP service type (only for standalone architecture)
+    ## ref: https://kubernetes.io/docs/concepts/services-networking/service/#external-ips
+    ##
+    externalIPs: []
+    ## @param service.loadBalancerIP notificationService service Load Balancer IP
+    ## ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-loadbalancer
+    ##
+    loadBalancerIP: ''
+    ## @param service.loadBalancerSourceRanges notificationService service Load Balancer sources
+    ## ref: https://kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/#restrict-access-for-loadbalancer-service
+    ## e.g:
+    ## loadBalancerSourceRanges:
+    ##   - 10.10.10.0/24
+    ##
+    loadBalancerSourceRanges: []
+    ## @param service.externalTrafficPolicy notificationService service external traffic policy
+    ## ref http://kubernetes.io/docs/tasks/access-application-cluster/create-external-load-balancer/#preserving-the-client-source-ip
+    ##
+    externalTrafficPolicy: Cluster
+    ## @param service.annotations Additional custom annotations for notificationService service
+    ##
+    annotations: {}
+    ## @param service.extraPorts Extra ports to expose in notificationService service (normally used with the `sidecars` value)
+    ##
+    extraPorts: []
+    ## @param service.sessionAffinity Control where client requests go, to the same pod or round-robin
+    ## Values: ClientIP or None
+    ## ref: https://kubernetes.io/docs/user-guide/services/
+    ##
+    sessionAffinity: None
+    ## @param service.sessionAffinityConfig Additional settings for the sessionAffinity
+    ## sessionAffinityConfig:
+    ##   clientIP:
+    ##     timeoutSeconds: 300
+    ##
+    sessionAffinityConfig: {}
+
+  ## worker api service parameters
+  ##
+  workerService:
+    ## @param service.type notificationService service type
+    ##
+    type: ClusterIP
+
+    ports:
+      worker: 8081
+
+    ## @param service.clusterIP notificationService service Cluster IP
+    ## e.g.:
+    ## clusterIP: None
+    ##
+    clusterIP: ''
+    ## @param service.externalIPs Specify the externalIP value ClusterIP service type (only for standalone architecture)
+    ## ref: https://kubernetes.io/docs/concepts/services-networking/service/#external-ips
+    ##
+    externalIPs: []
+    ## @param service.loadBalancerIP notificationService service Load Balancer IP
+    ## ref: https://kubernetes.io/docs/concepts/services-networking/service/#type-loadbalancer
+    ##
+    loadBalancerIP: ''
+    ## @param service.loadBalancerSourceRanges notificationService service Load Balancer sources
+    ## ref: https://kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/#restrict-access-for-loadbalancer-service
+    ## e.g:
+    ## loadBalancerSourceRanges:
+    ##   - 10.10.10.0/24
+    ##
+    loadBalancerSourceRanges: []
+    ## @param service.externalTrafficPolicy notificationService service external traffic policy
+    ## ref http://kubernetes.io/docs/tasks/access-application-cluster/create-external-load-balancer/#preserving-the-client-source-ip
+    ##
+    externalTrafficPolicy: Cluster
+    ## @param service.annotations Additional custom annotations for notificationService service
+    ##
+    annotations: {}
+    ## @param service.extraPorts Extra ports to expose in notificationService service (normally used with the `sidecars` value)
+    ##
+    extraPorts: []
+    ## @param service.sessionAffinity Control where client requests go, to the same pod or round-robin
+    ## Values: ClientIP or None
+    ## ref: https://kubernetes.io/docs/user-guide/services/
+    ##
+    sessionAffinity: None
+    ## @param service.sessionAffinityConfig Additional settings for the sessionAffinity
+    ## sessionAffinityConfig:
+    ##   clientIP:
+    ##     timeoutSeconds: 300
+    ##
+    sessionAffinityConfig: {}
+
+## Configure the ingress resource that allows you to access the
+## Nginx installation. Set up the URL
+## ref: https://kubernetes.io/docs/user-guide/ingress/
+##
+ingress:
+  ## @param ingress.enabled Set to true to enable ingress record generation
+  ##
+  enabled: true
+  ## @param ingress.selfSigned Create a TLS secret for this ingress record using self-signed certificates generated by Helm
+  ##
+  selfSigned: false
+  ## @param ingress.pathType Ingress path type
+  ##
+  pathType: Prefix
+  ## @param ingress.apiVersion Force Ingress API version (automatically detected if not set)
+  ##
+  apiVersion: ""
+  ## @param ingress.hostname Default host for the ingress resource
+  ##
+  hostname: ""
+  ## @param ingress.path The Path to Nginx. You may need to set this to '/*' in order to use this with ALB ingress controllers.
+  ##
+  path: /
+  ## @param ingress.annotations Additional annotations for the Ingress resource. To enable certificate autogeneration, place here your cert-manager annotations.
+  ## For a full list of possible ingress annotations, please see
+  ## ref: https://github.com/kubernetes/ingress-nginx/blob/master/docs/user-guide/nginx-configuration/annotations.md
+  ## Use this parameter to set the required annotations for cert-manager, see
+  ## ref: https://cert-manager.io/docs/usage/ingress/#supported-annotations
+  ##
+  ## e.g:
+  ## annotations:
+  ##   kubernetes.io/ingress.class: nginx
+  ##   cert-manager.io/cluster-issuer: cluster-issuer-name
+  ##
+  annotations: {}
+  ## @param ingress.ingressClassName Set the ingerssClassName on the ingress record for k8s 1.18+
+  ## This is supported in Kubernetes 1.18+ and required if you have more than one IngressClass marked as the default for your cluster .
+  ## ref: https://kubernetes.io/blog/2020/04/02/improvements-to-the-ingress-api-in-kubernetes-1.18/
+  ##
+  ingressClassName: ""
+  ## @param ingress.tls Create TLS Secret
+  ## TLS certificates will be retrieved from a TLS secret with name: {{- printf "%s-tls" .Values.ingress.hostname }}
+  ## You can use the ingress.secrets parameter to create this TLS secret or relay on cert-manager to create it
+  ##
+  tls: false
+  ## @param ingress.extraHosts The list of additional hostnames to be covered with this ingress record.
+  ## Most likely the hostname above will be enough, but in the event more hosts are needed, this is an array
+  ## extraHosts:
+  ## - name: nginx.local
+  ##   path: /
+  ##
+  extraHosts: []
+  ## @param ingress.extraPaths Any additional arbitrary paths that may need to be added to the ingress under the main host.
+  ## For example: The ALB ingress controller requires a special rule for handling SSL redirection.
+  ## extraPaths:
+  ## - path: /*
+  ##   backend:
+  ##     serviceName: ssl-redirect
+  ##     servicePort: use-annotation
+  ##
+  extraPaths: []
+  ## @param ingress.extraTls The tls configuration for additional hostnames to be covered with this ingress record.
+  ## see: https://kubernetes.io/docs/concepts/services-networking/ingress/#tls
+  ## extraTls:
+  ## - hosts:
+  ##     - nginx.local
+  ##   secretName: nginx.local-tls
+  ##
+  extraTls: []
+  ## @param ingress.secrets If you're providing your own certificates, please use this to add the certificates as secrets
+  ## key and certificate should start with -----BEGIN CERTIFICATE----- or
+  ## -----BEGIN RSA PRIVATE KEY-----
+  ##
+  ## name should line up with a tlsSecret set further up
+  ## If you're using cert-manager, this is unneeded, as it will create the secret for you if it is not set
+  ##
+  ## It is also possible to create and manage the certificates outside of this helm chart
+  ## Please see README.md for more information
+  ## e.g:
+  ## - name: nginx.local-tls
+  ##   key:
+  ##   certificate:
+  ##
+  secrets: []
+  ## @param ingress.extraRules The list of additional rules to be added to this ingress record. Evaluated as a template
+  ## Useful when looking for additional customization, such as using different backend
+  ##
+  extraRules: []
+
+## Configure the ingress resource that allows you to access the
+## Nginx installation. Set up the URL
+## ref: https://kubernetes.io/docs/user-guide/ingress/
+##
+workerIngress:
+  ## @param ingress.enabled Set to true to enable ingress record generation
+  ##
+  enabled: true
+  ## @param ingress.selfSigned Create a TLS secret for this ingress record using self-signed certificates generated by Helm
+  ##
+  selfSigned: false
+  ## @param ingress.pathType Ingress path type
+  ##
+  pathType: Prefix
+  ## @param ingress.apiVersion Force Ingress API version (automatically detected if not set)
+  ##
+  apiVersion: ""
+  ## @param ingress.hostname Default host for the ingress resource
+  ##
+  hostname: ""
+  ## @param ingress.path The Path to Nginx. You may need to set this to '/*' in order to use this with ALB ingress controllers.
+  ##
+  path: /
+  ## @param ingress.annotations Additional annotations for the Ingress resource. To enable certificate autogeneration, place here your cert-manager annotations.
+  ## For a full list of possible ingress annotations, please see
+  ## ref: https://github.com/kubernetes/ingress-nginx/blob/master/docs/user-guide/nginx-configuration/annotations.md
+  ## Use this parameter to set the required annotations for cert-manager, see
+  ## ref: https://cert-manager.io/docs/usage/ingress/#supported-annotations
+  ##
+  ## e.g:
+  ## annotations:
+  ##   kubernetes.io/ingress.class: nginx
+  ##   cert-manager.io/cluster-issuer: cluster-issuer-name
+  ##
+  annotations: {}
+  ## @param ingress.ingressClassName Set the ingerssClassName on the ingress record for k8s 1.18+
+  ## This is supported in Kubernetes 1.18+ and required if you have more than one IngressClass marked as the default for your cluster .
+  ## ref: https://kubernetes.io/blog/2020/04/02/improvements-to-the-ingress-api-in-kubernetes-1.18/
+  ##
+  ingressClassName: ""
+  ## @param ingress.tls Create TLS Secret
+  ## TLS certificates will be retrieved from a TLS secret with name: {{- printf "%s-tls" .Values.ingress.hostname }}
+  ## You can use the ingress.secrets parameter to create this TLS secret or relay on cert-manager to create it
+  ##
+  tls: false
+  ## @param ingress.extraHosts The list of additional hostnames to be covered with this ingress record.
+  ## Most likely the hostname above will be enough, but in the event more hosts are needed, this is an array
+  ## extraHosts:
+  ## - name: nginx.local
+  ##   path: /
+  ##
+  extraHosts: []
+  ## @param ingress.extraPaths Any additional arbitrary paths that may need to be added to the ingress under the main host.
+  ## For example: The ALB ingress controller requires a special rule for handling SSL redirection.
+  ## extraPaths:
+  ## - path: /*
+  ##   backend:
+  ##     serviceName: ssl-redirect
+  ##     servicePort: use-annotation
+  ##
+  extraPaths: []
+  ## @param ingress.extraTls The tls configuration for additional hostnames to be covered with this ingress record.
+  ## see: https://kubernetes.io/docs/concepts/services-networking/ingress/#tls
+  ## extraTls:
+  ## - hosts:
+  ##     - nginx.local
+  ##   secretName: nginx.local-tls
+  ##
+  extraTls: []
+  ## @param ingress.secrets If you're providing your own certificates, please use this to add the certificates as secrets
+  ## key and certificate should start with -----BEGIN CERTIFICATE----- or
+  ## -----BEGIN RSA PRIVATE KEY-----
+  ##
+  ## name should line up with a tlsSecret set further up
+  ## If you're using cert-manager, this is unneeded, as it will create the secret for you if it is not set
+  ##
+  ## It is also possible to create and manage the certificates outside of this helm chart
+  ## Please see README.md for more information
+  ## e.g:
+  ## - name: nginx.local-tls
+  ##   key:
+  ##   certificate:
+  ##
+  secrets: []
+  ## @param ingress.extraRules The list of additional rules to be added to this ingress record. Evaluated as a template
+  ## Useful when looking for additional customization, such as using different backend
+  ##
+  extraRules: []

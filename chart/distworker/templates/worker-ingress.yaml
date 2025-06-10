@@ -1,0 +1,60 @@
+{{- if .Values.workerIngress.enabled }}
+apiVersion: {{ include "common.capabilities.ingress.apiVersion" . }}
+kind: Ingress
+metadata:
+  name: {{ printf "%s-worker" (include "common.names.fullname" .) }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" . | nindent 4 }}
+    {{- if .Values.commonLabels }}
+    {{- include "common.tplvalues.render" ( dict "value" .Values.commonLabels "context" $ ) | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- if .Values.workerIngress.annotations }}
+      {{- include "common.tplvalues.render" (dict "value" .Values.workerIngress.annotations "context" $) | nindent 4 }}
+      {{- end }}
+      {{- if .Values.commonAnnotations }}
+      {{- include "common.tplvalues.render" ( dict "value" .Values.commonAnnotations "context" $ ) | nindent 4 }}
+      {{- end }}
+spec:
+  {{- if and .Values.workerIngress.ingressClassName (eq "true" (include "common.ingress.supportsIngressClassname" .)) }}
+  ingressClassName: {{ .Values.workerIngress.ingressClassName | quote }}
+  {{- end }}
+  rules:
+    - http:
+        paths:
+          {{- if .Values.workerIngress.extraPaths }}
+          {{- toYaml .Values.workerIngress.extraPaths | nindent 10 }}
+          {{- end }}
+          - path: /worker
+            {{- if eq "true" (include "common.ingress.supportsPathType" .) }}
+            pathType: {{ .Values.workerIngress.pathType }}
+            {{- end }}
+            backend: {{- include "common.ingress.backend" (dict "serviceName" (printf "%s-controller-worker" (include "common.names.fullname" .)) "servicePort" "worker-api" "context" $)  | nindent 14 }}
+      {{- if .Values.workerIngress.hostname }}
+      host: {{ .Values.workerIngress.hostname | quote }}
+      {{- end }}
+    {{- range .Values.workerIngress.extraHosts }}
+    - host: {{ .name | quote }}
+      http:
+        paths:
+          - path: {{ default "/" .path }}
+            {{- if eq "true" (include "common.ingress.supportsPathType" $) }}
+            pathType: {{ default "Prefix" .pathType }}
+            {{- end }}
+            backend: {{- include "common.ingress.backend" (dict "serviceName" (include "common.names.fullname" $) "servicePort" "worker-api" "context" $) | nindent 14 }}
+    {{- end }}
+    {{- if .Values.workerIngress.extraRules }}
+    {{- include "common.tplvalues.render" (dict "value" .Values.workerIngress.extraRules "context" $) | nindent 4 }}
+    {{- end }}
+  {{- if or (and .Values.workerIngress.tls (or (include "common.ingress.certManagerRequest" ( dict "annotations" .Values.workerIngress.annotations )) .Values.workerIngress.selfSigned (not (empty .Values.workerIngress.secrets)))) .Values.workerIngress.extraTls }}
+  tls:
+    {{- if and .Values.workerIngress.tls (or (include "common.ingress.certManagerRequest" ( dict "annotations" .Values.workerIngress.annotations )) .Values.workerIngress.selfSigned (not (empty .Values.workerIngress.secrets))) }}
+    - hosts:
+        - {{ .Values.workerIngress.hostname | quote }}
+      secretName: {{ printf "%s-tls" .Values.workerIngress.hostname }}
+    {{- end }}
+    {{- if .Values.workerIngress.extraTls }}
+    {{- include "common.tplvalues.render" (dict "value" .Values.workerIngress.extraTls "context" $) | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}

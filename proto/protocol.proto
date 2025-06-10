@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+package kr.jclab.distworker.protocol;
+
+option go_package = "github.com/jc-lab/distworker/internal/protocol";
+
+import "google/protobuf/struct.proto";
+
+// 메시지 타입 열거형
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_WORKER_REGISTER = 2;
+  MESSAGE_TYPE_WORKER_REGISTER_RESPONSE = 3;
+  MESSAGE_TYPE_HEARTBEAT = 9;
+  MESSAGE_TYPE_TASK_ASSIGN = 10;
+  MESSAGE_TYPE_TASK_PROGRESS = 11;
+  MESSAGE_TYPE_TASK_COMPLETE = 12;
+  MESSAGE_TYPE_TASK_FAILED = 13;
+}
+
+// Worker 상태 열거형
+enum WorkerHealth {
+  WORKER_HEALTH_UNSPECIFIED = 0;
+  WORKER_HEALTH_UP = 1;
+  WORKER_HEALTH_DOWN = 2;
+  WORKER_HEALTH_WARN = 3;
+}
+
+// Task 상태 열거형
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  TASK_STATUS_PENDING = 1;
+  TASK_STATUS_PROCESSING = 2;
+  TASK_STATUS_COMPLETED = 3;
+  TASK_STATUS_FAILED = 4;
+  TASK_STATUS_CANCELLED = 5;
+}
+
+// DateKey = HMAC-SHA256(key = "DISTWORKER1" + worker_token, date = "<YYYYMMDD>")
+// SigningKey = HMAC-SHA256(key = <DateKey>, data = "distworker1_websocket")
+
+// Worker 등록 메시지
+message WorkerRegister {
+  bytes data = 1; // SignedWorkerRegister 에 대한 marshaled 값
+  bytes signature = 2; // HMAC-SHA256(key = <SigningKey>, data = data)
+}
+
+message WorkerRegisterResponse {
+  int32 idle_time = 10; // seconds (0 is infinite)
+}
+
+message SignedWorkerRegister {
+  string provisioner_name = 1;
+  string worker_id = 2; // 만약 provisioner 가 worker 을 만든 경우 라면
+  string date = 3; // 20220830T123600Z 형식
+  ResourceInfo resource_info = 4;
+}
+
+// Controller → Worker Task 할당
+message TaskAssign {
+  string task_id = 1;           // Task Id (UUIDv7)
+  string queue = 2;             // Queue 이름
+  google.protobuf.Struct metadata = 3;  // Task 메타데이터
+  google.protobuf.Struct input = 4;     // Task 입력 데이터
+  int64 timeout_ms = 5;         // 타임아웃 (밀리초)
+  repeated FileInfo files = 6;  // 업로드된 파일 정보
+}
+
+// Worker → Controller 진행상황 보고
+message TaskProgress {
+  string task_id = 1;           // Task ID
+  float progress = 2;           // 진행률 (0.0-1.0)
+  string message = 3;           // 진행 메시지
+  google.protobuf.Struct data = 4;      // 추가 진행 데이터
+}
+
+// Worker → Controller 완료 보고
+message TaskComplete {
+  string task_id = 1;           // Task ID
+  google.protobuf.Struct result = 2;    // 작업 결과
+  repeated FileInfo result_files = 3;   // 결과 파일 정보
+}
+
+// Worker → Controller 실패 보고
+message TaskFailed {
+  string task_id = 1;           // Task ID
+  string error_code = 2;        // 에러 코드
+  string error_message = 3;     // 에러 메시지
+  google.protobuf.Struct error_details = 4;  // 상세 에러 정보
+}
+
+// 연결 상태 유지
+message Heartbeat {
+  int64 timestamp = 1;          // 타임스탬프 (Unix milliseconds)
+  WorkerHealth health = 2;      // Worker 상태
+  ResourceUsage resource_usage = 3;  // 리소스 사용량
+}
+
+// Worker 리소스 정보
+message ResourceInfo {
+  string hostname = 1;
+  int32 cpu_cores = 2;          // CPU 코어 수
+  int64 memory_mb = 3;          // 메모리 (MiB)
+  google.protobuf.Struct additional = 4;  // 추가 리소스 정보
+}
+
+// 리소스 사용량
+message ResourceUsage {
+  float cpu_percent = 1;        // CPU 사용률 (0-100)
+  int64 memory_used_mb = 2;     // 사용 중인 메모리 (MiB)
+  float gpu_utilization = 3;    // GPU 사용률 (0-100, 선택사항)
+  google.protobuf.Struct additional = 4;  // 추가 사용량 정보
+}
+
+// 파일 정보
+message FileInfo {
+  string file_id = 1;           // 파일 ID
+  string filename = 2;          // 원본 파일명
+  string content_type = 3;      // MIME 타입
+  int64  size = 4;              // 파일 크기 (bytes)
+  string storage_url = 5;       // 스토리지 URL (S3 등)
+}
+
+// WebSocket 메시지 래퍼
+message WebSocketMessage {
+  MessageType type = 1;
+  oneof payload {
+    WorkerRegister worker_register = 2;
+    WorkerRegisterResponse worker_register_response = 3;
+    Heartbeat heartbeat = 9;
+    TaskAssign task_assign = 10;
+    TaskProgress task_progress = 11;
+    TaskComplete task_complete = 12;
+    TaskFailed task_failed = 13;
+  }
+}

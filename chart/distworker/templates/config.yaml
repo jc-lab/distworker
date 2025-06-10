@@ -1,0 +1,15 @@
+{{- $configMapName := include "distworker.config-map-name" . -}}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $configMapName | quote }}
+  namespace: {{ include "common.names.namespace" . | quote }}
+  labels: {{- include "common.labels.standard" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-weight": "-50"
+data:
+  "server-id": {{ default uuidv4 .Values.server.id | quote }}
+  "config.yaml": |
+    {{- .Values.controller.configYaml | toYaml | nindent 4 }}

@@ -1,0 +1,77 @@
+name: Build and deploy
+permissions:
+  contents: read
+  packages: write
+
+on:
+  push: {}
+#    branches:
+#      - main
+#    tags:
+#      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '^1.24'
+      - name: Build
+        run: |
+          mkdir -p dist
+          go build -o dist/controller ./go/cmd/controller
+      - name: Archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+  collector-deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.docker_meta.outputs.tags }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      # ===== DOCKER IMAGE PUSH =====
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        if: ${{ github.event_name == 'push' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/distworker-controller
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: dist.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            DAEMON_NAME=controller
+            DIST_FILE=./dist/controller
