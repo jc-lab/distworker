@@ -27,7 +27,7 @@ import (
 	"github.com/jc-lab/distworker/go/pkg/api"
 	"github.com/jc-lab/distworker/go/pkg/controller/database"
 	"github.com/jc-lab/distworker/go/pkg/controller/storage"
-	"github.com/jc-lab/distworker/go/pkg/controller/websocket"
+	"github.com/jc-lab/distworker/go/pkg/controller/worker"
 	"github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"io"
@@ -159,7 +159,7 @@ func createTestServer() (*Server, *database_mock.MockDatabase, *MockStorage) {
 	server := &Server{}
 	server.SetDatabase(mockDB)
 	server.SetStorage(mockStorage)
-	server.workerManager = &websocket.WorkerManager{}
+	server.workerManager = &worker.Manager{}
 
 	return server, mockDB, mockStorage
 }

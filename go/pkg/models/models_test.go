@@ -387,7 +387,7 @@ func TestWorkerSessionJSONMarshaling(t *testing.T) {
 		}
 
 		if unmarshaled.WorkerId != session.WorkerId {
-			t.Errorf("Expected WorkerId %s, got %s", session.WorkerId, unmarshaled.WorkerId)
+			t.Errorf("Expected workerId %s, got %s", session.WorkerId, unmarshaled.WorkerId)
 		}
 		if unmarshaled.WorkerToken != "" {
 			t.Error("WorkerToken should not be unmarshaled from JSON")

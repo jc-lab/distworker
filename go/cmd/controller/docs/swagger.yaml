@@ -1,0 +1,722 @@
+basePath: /api/v1
+definitions:
+  api.CreateQueueRequest:
+    properties:
+      description:
+        type: string
+      name:
+        type: string
+    type: object
+  api.CreateTaskRequest:
+    properties:
+      input:
+        additionalProperties: true
+        type: object
+      metadata:
+        additionalProperties: true
+        type: object
+      queue:
+        type: string
+      retry:
+        type: integer
+      timeout:
+        type: string
+    type: object
+  api.DeleteQueueResponse:
+    properties:
+      status:
+        type: string
+    type: object
+  api.DeleteTaskResponse:
+    properties:
+      status:
+        $ref: '#/definitions/types.TaskStatus'
+      task_id:
+        type: string
+    type: object
+  api.DeleteWorkerResponse:
+    properties:
+      current_task:
+        type: string
+      status:
+        type: string
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+      status:
+        type: string
+    type: object
+  api.HealthDetail:
+    properties:
+      message:
+        type: string
+      response_time:
+        type: integer
+      status:
+        $ref: '#/definitions/types.HealthStatus'
+    type: object
+  api.HealthResponse:
+    properties:
+      details:
+        additionalProperties:
+          $ref: '#/definitions/api.HealthDetail'
+        type: object
+      error:
+        type: string
+      status:
+        $ref: '#/definitions/types.HealthStatus'
+      timestamp:
+        type: integer
+      version:
+        type: string
+    type: object
+  api.ListQueuesResponse:
+    properties:
+      queues:
+        items:
+          $ref: '#/definitions/models.Queue'
+        type: array
+    type: object
+  api.ListTasksResponse:
+    properties:
+      pagination:
+        $ref: '#/definitions/api.PaginationInfo'
+      tasks:
+        items:
+          $ref: '#/definitions/models.Task'
+        type: array
+    type: object
+  api.ListWorkersResponse:
+    properties:
+      workers:
+        items:
+          $ref: '#/definitions/models.Worker'
+        type: array
+    type: object
+  api.PaginationInfo:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
+    type: object
+  api.UpdateQueueRequest:
+    properties:
+      description:
+        type: string
+    type: object
+  models.FileInfo:
+    properties:
+      content_type:
+        type: string
+      file_id:
+        type: string
+      filename:
+        type: string
+      size:
+        type: integer
+      storage_url:
+        type: string
+    type: object
+  models.Provisioner:
+    properties:
+      last_heartbeat:
+        $ref: '#/definitions/models.UnixTime'
+      max_workers:
+        type: integer
+      name:
+        type: string
+      status:
+        $ref: '#/definitions/types.ProvisionerStatus'
+      url:
+        type: string
+      workers:
+        type: integer
+    type: object
+  models.Queue:
+    properties:
+      created_at:
+        $ref: '#/definitions/models.UnixTime'
+      description:
+        type: string
+      name:
+        type: string
+      status:
+        $ref: '#/definitions/types.QueueStatus'
+      updated_at:
+        $ref: '#/definitions/models.UnixTime'
+    type: object
+  models.QueueStats:
+    properties:
+      avg_processing_time:
+        type: integer
+      completed_tasks:
+        type: integer
+      current_workers:
+        type: integer
+      failed_tasks:
+        type: integer
+      peak_workers:
+        type: integer
+      queue_name:
+        type: string
+      total_tasks:
+        type: integer
+      workers:
+        items:
+          $ref: '#/definitions/models.Worker'
+        type: array
+    type: object
+  models.Task:
+    properties:
+      completed_at:
+        $ref: '#/definitions/models.UnixTime'
+      created_at:
+        $ref: '#/definitions/models.UnixTime'
+      error:
+        $ref: '#/definitions/models.TaskError'
+      files:
+        items:
+          $ref: '#/definitions/models.FileInfo'
+        type: array
+      input:
+        additionalProperties: true
+        type: object
+      max_retry:
+        type: integer
+      metadata:
+        additionalProperties: true
+        type: object
+      queue:
+        type: string
+      result:
+        additionalProperties: true
+        type: object
+      result_files:
+        items:
+          $ref: '#/definitions/models.FileInfo'
+        type: array
+      retried:
+        type: integer
+      started_at:
+        $ref: '#/definitions/models.UnixTime'
+      status:
+        $ref: '#/definitions/types.TaskStatus'
+      task_id:
+        type: string
+      timeout:
+        type: integer
+      webhook_url:
+        type: string
+      worker_id:
+        type: string
+    type: object
+  models.TaskError:
+    properties:
+      code:
+        $ref: '#/definitions/types.TaskErrorCode'
+      details:
+        additionalProperties: true
+        type: object
+      message:
+        type: string
+    type: object
+  models.UnixTime:
+    properties:
+      time.Time:
+        type: string
+    type: object
+  models.Worker:
+    properties:
+      connected_at:
+        $ref: '#/definitions/models.UnixTime'
+      current_task:
+        type: string
+      last_heartbeat:
+        $ref: '#/definitions/models.UnixTime'
+      provisioner_name:
+        type: string
+      queues:
+        items:
+          type: string
+        type: array
+      resource_info:
+        additionalProperties: true
+        type: object
+      status:
+        $ref: '#/definitions/types.WorkerStatus'
+      worker_id:
+        type: string
+    type: object
+  types.HealthStatus:
+    enum:
+    - up
+    - down
+    - degraded
+    type: string
+    x-enum-varnames:
+    - HealthStatusUp
+    - HealthStatusDown
+    - HealthStatusDegraded
+  types.ProvisionerStatus:
+    enum:
+    - up
+    - down
+    type: string
+    x-enum-varnames:
+    - ProvisionerStatusUp
+    - ProvisionerStatusDown
+  types.QueueStatus:
+    enum:
+    - active
+    - inactive
+    type: string
+    x-enum-varnames:
+    - QueueStatusActive
+    - QueueStatusInactive
+  types.TaskErrorCode:
+    enum:
+    - CANCELLED
+    - TIMEOUT
+    - WORKER_ERROR
+    - NETWORK_ERROR
+    - UNKNOWN
+    type: string
+    x-enum-varnames:
+    - TaskErrorCodeCancelled
+    - TaskErrorCodeTimeout
+    - TaskErrorCodeWorkerError
+    - TaskErrorCodeNetworkError
+    - TaskErrorCodeUnknown
+  types.TaskStatus:
+    enum:
+    - 0
+    - 2
+    - 4
+    - 8
+    type: integer
+    x-enum-varnames:
+    - TaskStatusPending
+    - TaskStatusProcessing
+    - TaskStatusCompleted
+    - TaskStatusFinished
+  types.WorkerStatus:
+    enum:
+    - idle
+    - processing
+    - disconnected
+    - error
+    type: string
+    x-enum-varnames:
+    - WorkerStatusIdle
+    - WorkerStatusProcessing
+    - WorkerStatusDisconnected
+    - WorkerStatusError
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: Distributed task processing system API
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Distworker API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Get system health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.HealthResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.HealthResponse'
+      summary: Health check
+      tags:
+      - system
+  /metrics:
+    get:
+      consumes:
+      - text/plain
+      description: Get Prometheus metrics
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Prometheus metrics
+          schema:
+            type: string
+      summary: Prometheus metrics
+      tags:
+      - system
+  /provisioners:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all worker provisioners
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Provisioner'
+            type: array
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List provisioners
+      tags:
+      - provisioners
+  /queues:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all task queues
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ListQueuesResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List queues
+      tags:
+      - queues
+    post:
+      consumes:
+      - application/json
+      description: Create a new task queue
+      parameters:
+      - description: Queue data
+        in: body
+        name: queue
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateQueueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Queue'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Create a new queue
+      tags:
+      - queues
+  /queues/{queue_name}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a task queue
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue_name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.DeleteQueueResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Delete queue
+      tags:
+      - queues
+    get:
+      consumes:
+      - application/json
+      description: Get detailed information about a specific queue
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue_name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Queue'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get queue by name
+      tags:
+      - queues
+    put:
+      consumes:
+      - application/json
+      description: Update queue description
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue_name
+        required: true
+        type: string
+      - description: Queue update data
+        in: body
+        name: queue
+        required: true
+        schema:
+          $ref: '#/definitions/api.UpdateQueueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Queue'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update queue
+      tags:
+      - queues
+  /queues/{queue_name}/stats:
+    get:
+      consumes:
+      - application/json
+      description: Get statistics for a specific queue
+      parameters:
+      - description: Queue name
+        in: path
+        name: queue_name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.QueueStats'
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get queue statistics
+      tags:
+      - queues
+  /tasks:
+    get:
+      consumes:
+      - application/json
+      description: Get a paginated list of tasks with optional filtering
+      parameters:
+      - description: Filter by queue name
+        in: query
+        name: queue
+        type: string
+      - description: Filter by task status
+        in: query
+        name: status
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ListTasksResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List tasks
+      tags:
+      - tasks
+    post:
+      consumes:
+      - application/json
+      - multipart/form-data
+      description: Create a new task in the specified queue
+      parameters:
+      - description: wait timeout (milliseconds). -1 is infinite, 0 is disabled, >=0
+          is wait
+        in: query
+        name: wait
+        type: integer
+      - description: Task data
+        in: body
+        name: task
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateTaskRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Task'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Create a new task
+      tags:
+      - tasks
+  /tasks/{task_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Cancel a pending or processing task
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.DeleteTaskResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Cancel/Delete a task
+      tags:
+      - tasks
+    get:
+      consumes:
+      - application/json
+      description: Get detailed information about a specific task
+      parameters:
+      - description: Task ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Task'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Get task by ID
+      tags:
+      - tasks
+  /workers:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all connected workers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ListWorkersResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: List workers
+      tags:
+      - workers
+  /workers/{worker_id}:
+    delete:
+      consumes:
+      - application/json
+      description: Disconnect a specific worker
+      parameters:
+      - description: Worker ID
+        in: path
+        name: worker_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.DeleteWorkerResponse'
+        "501":
+          description: Not Implemented
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Disconnect worker
+      tags:
+      - workers
+schemes:
+- http
+- https
+swagger: "2.0"

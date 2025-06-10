@@ -19,6 +19,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/jc-lab/distworker/go/internal/protocol"
 	"github.com/jc-lab/distworker/go/internal/version"
@@ -28,6 +29,7 @@ import (
 	models2 "github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"io"
+	"log"
 	"mime/multipart"
 	"path/filepath"
 	"strings"
@@ -40,6 +42,18 @@ import (
 )
 
 // handleCreateTask handles POST /api/v1/tasks
+//
+// @Summary Create a new task
+// @Description Create a new task in the specified queue
+// @Tags tasks
+// @Accept json,multipart/form-data
+// @Produce json
+// @Param wait query int false "wait timeout (milliseconds). -1 is infinite, 0 is disabled, >=0 is wait"
+// @Param task body api.CreateTaskRequest true "Task data"
+// @Success 200 {object} models.Task
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /tasks [post]
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 
@@ -47,6 +61,17 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		s.handleCreateTaskWithFiles(w, r)
 		return
+	}
+
+	var wait int = 0
+	waitParam := r.URL.Query().Get("wait")
+	if waitParam != "" {
+		var err error
+		wait, err = strconv.Atoi(waitParam)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Handle JSON request
@@ -91,7 +116,33 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.workerManager.RequestAssignTask(task)
+	s.workerManager.EnqueueTask(task)
+
+	if wait < 0 || wait > 0 {
+		var err error
+		var waitCtx context.Context
+		var waitCancel context.CancelFunc
+		if wait > 0 {
+			waitCtx, waitCancel = context.WithTimeout(r.Context(), time.Duration(wait)*time.Millisecond)
+		} else {
+			waitCtx, waitCancel = context.WithCancel(r.Context())
+		}
+		defer waitCancel()
+
+		newTask, err := s.workerManager.WaitTask(waitCtx, task.Id)
+		if err != nil {
+			log.Printf("Task[%s] wait failed: %+v", task.Id, err)
+
+			task, err = s.db.GetTaskRepository().GetById(r.Context(), task.Id)
+			if err != nil {
+				log.Printf("get task[%s] failed: %+v", task.Id, err)
+				http.Error(w, "Task not found", http.StatusNotFound)
+				return
+			}
+		} else {
+			task = newTask
+		}
+	}
 
 	writeJson(w, http.StatusOK, task)
 }
@@ -174,7 +225,7 @@ func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Try to assign the task to an available worker
-	s.workerManager.RequestAssignTask(task)
+	s.workerManager.EnqueueTask(task)
 
 	writeJson(w, http.StatusOK, task)
 }
@@ -228,6 +279,16 @@ func (s *Server) uploadFile(r *http.Request, fieldName string, fileHeader *multi
 }
 
 // handleGetTask handles GET /api/v1/tasks/{task_id}
+//
+// @Summary Get task by ID
+// @Description Get detailed information about a specific task
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param task_id path string true "Task ID"
+// @Success 200 {object} models.Task
+// @Failure 404 {object} api.ErrorResponse
+// @Router /tasks/{task_id} [get]
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	taskId := vars["task_id"]
@@ -242,6 +303,19 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListTasks handles GET /api/v1/tasks
+//
+// @Summary List tasks
+// @Description Get a paginated list of tasks with optional filtering
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param queue query string false "Filter by queue name"
+// @Param status query string false "Filter by task status"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(20)
+// @Success 200 {object} api.ListTasksResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /tasks [get]
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	// Parse query parameters
 	queue := r.URL.Query().Get("queue")
@@ -291,6 +365,17 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteTask handles DELETE /api/v1/tasks/{task_id}
+//
+// @Summary Cancel/Delete a task
+// @Description Cancel a pending or processing task
+// @Tags tasks
+// @Accept json
+// @Produce json
+// @Param task_id path string true "Task ID"
+// @Success 200 {object} api.DeleteTaskResponse
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 404 {object} api.ErrorResponse
+// @Router /tasks/{task_id} [delete]
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	taskId := vars["task_id"]
@@ -330,6 +415,18 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreateQueue handles POST /api/v1/queues
+//
+// Queue routes
+// @Summary Create a new queue
+// @Description Create a new task queue
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Param queue body api.CreateQueueRequest true "Queue data"
+// @Success 200 {object} models.Queue
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /queues [post]
 func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
 	var request api.CreateQueueRequest
 
@@ -360,6 +457,15 @@ func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListQueues handles GET /api/v1/queues
+//
+// @Summary List queues
+// @Description Get a list of all task queues
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Success 200 {object} api.ListQueuesResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /queues [get]
 func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
 	queues, err := s.db.GetQueueRepository().List(r.Context())
 	if err != nil {
@@ -375,6 +481,16 @@ func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetQueue handles GET /api/v1/queues/{queue_name}
+//
+// @Summary Get queue by name
+// @Description Get detailed information about a specific queue
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Param queue_name path string true "Queue name"
+// @Success 200 {object} models.Queue
+// @Failure 404 {object} api.ErrorResponse
+// @Router /queues/{queue_name} [get]
 func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	queueName := vars["queue_name"]
@@ -389,6 +505,19 @@ func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdateQueue handles PUT /api/v1/queues/{queue_name}
+//
+// @Summary Update queue
+// @Description Update queue description
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Param queue_name path string true "Queue name"
+// @Param queue body api.UpdateQueueRequest true "Queue update data"
+// @Success 200 {object} models.Queue
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 404 {object} api.ErrorResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /queues/{queue_name} [put]
 func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	queueName := vars["queue_name"]
@@ -418,6 +547,16 @@ func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteQueue handles DELETE /api/v1/queues/{queue_name}
+//
+// @Summary Delete queue
+// @Description Delete a task queue
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Param queue_name path string true "Queue name"
+// @Success 200 {object} api.DeleteQueueResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /queues/{queue_name} [delete]
 func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	queueName := vars["queue_name"]
@@ -435,12 +574,31 @@ func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetQueueStats handles GET /api/v1/queues/{queue_name}/stats
+//
+// @Summary Get queue statistics
+// @Description Get statistics for a specific queue
+// @Tags queues
+// @Accept json
+// @Produce json
+// @Param queue_name path string true "Queue name"
+// @Success 200 {object} models.QueueStats
+// @Failure 501 {object} api.ErrorResponse
+// @Router /queues/{queue_name}/stats [get]
 func (s *Server) handleGetQueueStats(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement queue statistics
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
 // handleListWorkers handles GET /api/v1/workers
+//
+// @Summary List workers
+// @Description Get a list of all connected workers
+// @Tags workers
+// @Accept json
+// @Produce json
+// @Success 200 {object} api.ListWorkersResponse
+// @Failure 500 {object} api.ErrorResponse
+// @Router /workers [get]
 func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 	sessions, err := s.db.GetWorkerSessionRepository().List(r.Context())
 	if err != nil {
@@ -461,18 +619,46 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteWorker handles DELETE /api/v1/workers/{worker_id}
+//
+// @Summary Disconnect worker
+// @Description Disconnect a specific worker
+// @Tags workers
+// @Accept json
+// @Produce json
+// @Param worker_id path string true "Worker ID"
+// @Success 200 {object} api.DeleteWorkerResponse
+// @Failure 501 {object} api.ErrorResponse
+// @Router /workers/{worker_id} [delete]
 func (s *Server) handleDeleteWorker(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement worker disconnection
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
 // handleListProvisioners handles GET /api/v1/provisioners
+//
+// @Summary List provisioners
+// @Description Get a list of all worker provisioners
+// @Tags provisioners
+// @Accept json
+// @Produce json
+// @Success 200 {array} models.Provisioner
+// @Failure 501 {object} api.ErrorResponse
+// @Router /provisioners [get]
 func (s *Server) handleListProvisioners(w http.ResponseWriter, r *http.Request) {
 	// TODO: Implement provisioner listing
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
 // handleHealth handles GET /health
+//
+// @Summary Health check
+// @Description Get system health status
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} api.HealthResponse
+// @Failure 503 {object} api.HealthResponse
+// @Router /health [get]
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	response := &api.HealthResponse{
 		Timestamp: time.Now().UnixMilli(),
@@ -500,6 +686,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMetrics handles GET /metrics
+//
+// @Summary Prometheus metrics
+// @Description Get Prometheus metrics
+// @Tags system
+// @Accept text/plain
+// @Produce text/plain
+// @Success 200 {string} string "Prometheus metrics"
+// @Router /metrics [get]
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Collect latest metrics from database before serving
 	if s.metrics != nil {
@@ -521,7 +715,7 @@ func (s *Server) handleWorkerWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hand off connection to worker manager
-	go s.workerManager.HandleConnection(conn)
+	s.websocketListener.HandleConnection(conn)
 }
 
 // handleFileDownload handles GET /worker/v1/file/{file_id}

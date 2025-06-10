@@ -251,7 +251,7 @@ func TestValidateSignature(t *testing.T) {
 
 		// Check that worker ID was set in headers
 		if vctx.WorkerId != workerId {
-			t.Errorf("Expected WorkerId to be set to %s, got: %s", workerId, vctx.WorkerId)
+			t.Errorf("Expected workerId to be set to %s, got: %s", workerId, vctx.WorkerId)
 		}
 	})
 
@@ -295,7 +295,7 @@ func TestValidateSignature(t *testing.T) {
 			t.Fatalf("Failed to create request: %v", err)
 		}
 
-		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
+		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
@@ -314,7 +314,7 @@ func TestValidateSignature(t *testing.T) {
 		}
 
 		req.Header.Set("x-distworker-date", "2022-08-30 12:36:00") // Wrong format
-		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
+		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
@@ -335,7 +335,7 @@ func TestValidateSignature(t *testing.T) {
 		// Set date to 10 minutes ago
 		oldTime := time.Now().UTC().Add(-10 * time.Minute)
 		req.Header.Set("x-distworker-date", oldTime.Format(DateFormat))
-		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
+		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
@@ -356,7 +356,7 @@ func TestValidateSignature(t *testing.T) {
 		// Set date to 10 minutes in the future
 		futureTime := time.Now().UTC().Add(10 * time.Minute)
 		req.Header.Set("x-distworker-date", futureTime.Format(DateFormat))
-		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
+		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=x-distworker-date, Signature=abc123")
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
@@ -377,7 +377,7 @@ func TestValidateSignature(t *testing.T) {
 		// Set valid date but invalid signature
 		now := time.Now().UTC()
 		req.Header.Set("x-distworker-date", now.Format(DateFormat))
-		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=x-distworker-date, Signature=invalid-signature")
+		req.Header.Set("Authorization", "DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=x-distworker-date, Signature=invalid-signature")
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
@@ -401,11 +401,11 @@ func TestValidateSignature(t *testing.T) {
 
 		_, err = validateSignature(workerToken, req)
 		if err == nil {
-			t.Error("Expected error for missing WorkerId")
+			t.Error("Expected error for missing workerId")
 		}
 
-		if !strings.Contains(err.Error(), "missing WorkerId") {
-			t.Errorf("Expected error about missing WorkerId, got: %v", err)
+		if !strings.Contains(err.Error(), "missing workerId") {
+			t.Errorf("Expected error about missing workerId, got: %v", err)
 		}
 	})
 }
@@ -495,8 +495,8 @@ func TestBuildAuthorizationHeader(t *testing.T) {
 		}
 
 		// Check components
-		if !strings.Contains(authHeader, "WorkerId="+workerId) {
-			t.Errorf("Expected authorization header to contain WorkerId=%s", workerId)
+		if !strings.Contains(authHeader, "workerId="+workerId) {
+			t.Errorf("Expected authorization header to contain workerId=%s", workerId)
 		}
 
 		if !strings.Contains(authHeader, "SignedHeaders=") {
@@ -569,7 +569,7 @@ func TestCompleteAuthFlow(t *testing.T) {
 
 		// Verify worker ID was extracted
 		if vctx.WorkerId != workerId {
-			t.Errorf("Expected WorkerId to be %s, got: %s", workerId, vctx.WorkerId)
+			t.Errorf("Expected workerId to be %s, got: %s", workerId, vctx.WorkerId)
 		}
 	})
 
@@ -676,10 +676,10 @@ func TestEdgeCasesAndErrorHandling(t *testing.T) {
 		req.Header.Set("x-distworker-date", time.Now().UTC().Format(DateFormat))
 
 		malformedHeaders := []string{
-			"DISTWORKER1_HMAC_SHA256 WorkerId=test",                                // Missing other parts
-			"DISTWORKER1_HMAC_SHA256 WorkerId",                                     // No equals
+			"DISTWORKER1_HMAC_SHA256 workerId=test",                                // Missing other parts
+			"DISTWORKER1_HMAC_SHA256 workerId",                                     // No equals
 			"DISTWORKER1_HMAC_SHA256 =test, SignedHeaders=, Signature=",            // Empty key
-			"DISTWORKER1_HMAC_SHA256 WorkerId=test, SignedHeaders=date, Signature", // No equals for signature
+			"DISTWORKER1_HMAC_SHA256 workerId=test, SignedHeaders=date, Signature", // No equals for signature
 		}
 
 		for _, malformed := range malformedHeaders {

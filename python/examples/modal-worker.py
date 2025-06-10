@@ -30,15 +30,15 @@ async def worker(controller_url: str, provisioner: str, worker_id: str, worker_t
         print("task_handler: ", task)
         output_message = task.get_input("message") * 10
 
-        await worker.send_task_progress(30.0, "processing")
-
-        # Simulate some processing time
-        await asyncio.sleep(1)
-
-        await worker.send_task_progress(90.0, "finishing")
-
-        # Simulate some processing time
-        await asyncio.sleep(1)
+        # await worker.send_task_progress(30.0, "processing")
+        #
+        # # Simulate some processing time
+        # await asyncio.sleep(1)
+        #
+        # await worker.send_task_progress(90.0, "finishing")
+        #
+        # # Simulate some processing time
+        # await asyncio.sleep(1)
 
         return {
             "message": output_message,

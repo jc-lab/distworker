@@ -31,16 +31,16 @@ worker = Worker(
 async def task_handler(task: Task) -> Dict[str, Any]:
     print("task_handler: ", task)
     output_message = task.get_input("message") * 10
-
-    await worker.send_task_progress(30.0, "processing")
-
-    # Simulate some processing time
-    await asyncio.sleep(1)
-
-    await worker.send_task_progress(90.0, "finishing")
-
-    # Simulate some processing time
-    await asyncio.sleep(1)
+    #
+    # await worker.send_task_progress(30.0, "processing")
+    #
+    # # Simulate some processing time
+    # await asyncio.sleep(1)
+    #
+    # await worker.send_task_progress(90.0, "finishing")
+    #
+    # # Simulate some processing time
+    # await asyncio.sleep(1)
 
     return {
         "message": output_message,

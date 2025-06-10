@@ -125,9 +125,9 @@ func NewValidateContext(r *http.Request) (*ValidateContext, error) {
 
 	var exists bool
 
-	vctx.WorkerId, exists = authMap["WorkerId"]
+	vctx.WorkerId, exists = authMap["workerId"]
 	if !exists {
-		return vctx, fmt.Errorf("missing WorkerId in authorization header")
+		return vctx, fmt.Errorf("missing workerId in authorization header")
 	}
 
 	vctx.SignedHeaders, exists = authMap["SignedHeaders"]
@@ -263,7 +263,7 @@ func BuildAuthorizationHeader(workerID, workerToken string, r *http.Request) str
 	date := now.Format(DateOnlyFormat)
 	signature := GenerateSignature(workerToken, date, canonicalReq)
 
-	return fmt.Sprintf("DISTWORKER1_HMAC_SHA256 WorkerId=%s, SignedHeaders=%s, Signature=%s",
+	return fmt.Sprintf("DISTWORKER1_HMAC_SHA256 workerId=%s, SignedHeaders=%s, Signature=%s",
 		workerID, strings.Join(signedHeaders, ";"), signature)
 }
 

@@ -31,6 +31,8 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+
+	_ "github.com/jc-lab/distworker/go/cmd/controller/docs"
 )
 
 var k = koanf.New(".")

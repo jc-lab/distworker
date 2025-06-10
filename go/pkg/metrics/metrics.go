@@ -21,7 +21,7 @@ package metrics
 import (
 	"context"
 	"github.com/jc-lab/distworker/go/pkg/controller/database"
-	"github.com/jc-lab/distworker/go/pkg/controller/websocket"
+	"github.com/jc-lab/distworker/go/pkg/controller/worker"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"time"
 
@@ -326,7 +326,7 @@ func (m *Metrics) CollectDatabaseStats(ctx context.Context, db database.Database
 }
 
 // CollectDatabaseStats collects current database statistics
-func (m *Metrics) CollectWorkerStats(ctx context.Context, wm *websocket.WorkerManager) {
+func (m *Metrics) CollectWorkerStats(ctx context.Context, wm *worker.Manager) {
 	workers := wm.GetWorkersInfo()
 
 	// Collect worker worker counts

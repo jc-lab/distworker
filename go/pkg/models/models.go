@@ -115,13 +115,32 @@ type WorkerSession struct {
 	WorkerId string             `bson:"_id" json:"worker_id"`
 	Health   types.WorkerHealth `bson:"health" json:"health"`
 	// TODO: queues as set<string>
-	Queues          []string               `bson:"queues" json:"queues"`
-	CurrentTask     *Task                  `bson:"-"` // `bson:"current_task,omitempty" json:"current_task,omitempty"`
-	ConnectedAt     UnixTime               `bson:"connected_at" json:"connected_at"`
-	LastHeartbeat   UnixTime               `bson:"last_heartbeat" json:"last_heartbeat"`
+	Queues        []string `bson:"queues" json:"queues"`
+	CurrentTask   *Task    `bson:"-"` // `bson:"current_task,omitempty" json:"current_task,omitempty"`
+	ConnectedAt   UnixTime `bson:"connected_at" json:"connected_at"`
+	LastHeartbeat UnixTime `bson:"last_heartbeat" json:"last_heartbeat"`
+	// Rtt microseconds
+	Rtt             int64                  `bson:"rtt" json:"rtt"`
 	ProvisionerName string                 `bson:"provisioner_name" json:"provisioner_name"`
 	ResourceInfo    map[string]interface{} `bson:"resource_info" json:"resource_info"`
 	WorkerToken     string                 `bson:"worker_token" json:"-"` // Don't expose in JSON
+}
+
+func (s *WorkerSession) AssignTask(task *Task) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.CurrentTask != nil {
+		return false
+	}
+	s.CurrentTask = task
+	return true
+}
+
+func (s *WorkerSession) ClearTask() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.CurrentTask = nil
 }
 
 func (s *WorkerSession) ToModel() *Worker {

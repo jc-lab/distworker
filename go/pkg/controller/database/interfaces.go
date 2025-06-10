@@ -101,7 +101,7 @@ type WorkerSessionRepositoryInterface interface {
 	List(ctx context.Context) ([]*models.WorkerSession, error)
 
 	// UpdateHeartbeat updates the last heartbeat time for a worker
-	UpdateHeartbeat(ctx context.Context, workerId string, health types.WorkerHealth) error
+	UpdateHeartbeat(ctx context.Context, session *models.WorkerSession) error
 }
 
 // TaskFilter represents filters for task queries

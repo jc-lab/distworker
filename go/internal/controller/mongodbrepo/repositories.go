@@ -331,13 +331,14 @@ func (r *WorkerSessionRepository) List(ctx context.Context) ([]*models2.WorkerSe
 }
 
 // UpdateHeartbeat updates the last heartbeat time for a worker
-func (r *WorkerSessionRepository) UpdateHeartbeat(ctx context.Context, workerId string, health types.WorkerHealth) error {
+func (r *WorkerSessionRepository) UpdateHeartbeat(ctx context.Context, session *models2.WorkerSession) error {
 	update := bson.M{
 		"$set": bson.M{
 			"last_heartbeat": models2.Now(),
-			"health":         health,
+			"health":         session.Health,
+			"rtt":            session.Rtt,
 		},
 	}
-	_, err := r.db.WorkerSessionsCollection().UpdateOne(ctx, bson.M{"_id": workerId}, update)
+	_, err := r.db.WorkerSessionsCollection().UpdateOne(ctx, bson.M{"_id": session.WorkerId}, update)
 	return err
 }

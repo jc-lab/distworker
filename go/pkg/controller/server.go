@@ -16,10 +16,24 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// Package controller provides the main controller server
+// @title Distworker API
+// @version 1.0
+// @description Distributed task processing system API
+// @termsOfService http://swagger.io/terms/
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+// @license.name AGPL-3.0
+// @license.url https://www.gnu.org/licenses/agpl-3.0.html
+// @host localhost:8080
+// @BasePath /api/v1
+// @schemes http https
 package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gorilla/handlers"
 	"github.com/jc-lab/distworker/go/internal/provisioner"
@@ -27,21 +41,28 @@ import (
 	config2 "github.com/jc-lab/distworker/go/pkg/controller/config"
 	database2 "github.com/jc-lab/distworker/go/pkg/controller/database"
 	"github.com/jc-lab/distworker/go/pkg/controller/storage"
-	wsmanager "github.com/jc-lab/distworker/go/pkg/controller/websocket"
+	wsmanager "github.com/jc-lab/distworker/go/pkg/controller/worker"
+	websocket2 "github.com/jc-lab/distworker/go/pkg/controller/worker/websocket"
 	"github.com/jc-lab/distworker/go/pkg/metrics"
 	models2 "github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
+	errors2 "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.uber.org/zap"
 	"log"
+	"net"
 	"net/http"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+// @host
 
 // Server represents the main controller server
 type Server struct {
@@ -64,10 +85,14 @@ type Server struct {
 	provisionerManager provisioner.Manager
 
 	// Worker management
-	workerManager *wsmanager.WorkerManager
+	workerManager *wsmanager.Manager
+
+	websocketListener *websocket2.Listener
 
 	// Shutdown channel
-	shutdown chan struct{}
+	shutdown          chan struct{}
+	shutdownRequested bool
+	mu                sync.Mutex
 }
 
 // NewServer creates a new controller server
@@ -127,9 +152,10 @@ func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 		return nil, err
 	}
 
-	server.workerManager = wsmanager.NewWorkerManager(ctx, server.db, server.provisionerManager, server.rootLogger)
-
+	server.workerManager = wsmanager.NewManager(ctx, server.db, server.provisionerManager, server.rootLogger)
 	server.provisionerManager.SetWorkerManager(server.workerManager)
+
+	server.websocketListener = websocket2.NewListener(ctx, server.db, server.provisionerManager, server.workerManager)
 
 	// Setup routes
 	server.setupAPIRoutes()
@@ -182,23 +208,45 @@ func (s *Server) Start() error {
 	// Start metrics collection goroutine
 	go s.startMetricsCollection()
 
+	apiListener, err := net.Listen("tcp", apiServer.Addr)
+	if err != nil {
+		return errors2.Wrap(err, "failed to start API server")
+	}
+
+	workerListener, err := net.Listen("tcp", workerServer.Addr)
+	if err != nil {
+		return errors2.Wrap(err, "failed to start Worker server")
+	}
+
 	// Start servers in goroutines
 	go func() {
+		defer apiListener.Close()
+
+		s.router.PathPrefix("/swagger/").Handler(httpSwagger.Handler(
+			//httpSwagger.URL("/swagger/doc.json"),
+			httpSwagger.DeepLinking(true),
+			httpSwagger.DocExpansion("none"),
+			httpSwagger.DomID("swagger-ui"),
+		)).Methods(http.MethodGet)
+
 		log.Printf("Starting API server on port %d", s.config.Server.API.Port)
-		if err := apiServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := apiServer.Serve(apiListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("API server error: %v", err)
+			s.Stop()
 		}
 	}()
 
 	go func() {
+		defer workerListener.Close()
+
 		log.Printf("Starting Worker server on port %d", s.config.Server.Worker.Port)
-		if err := workerServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := workerServer.Serve(workerListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("Worker server error: %v", err)
+			s.Stop()
 		}
 	}()
 
-	// Wait for shutdown signal
-	<-s.shutdown
+	_, _ = <-s.shutdown
 
 	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -239,7 +287,12 @@ func (s *Server) Start() error {
 
 // Stop stops the server
 func (s *Server) Stop() {
-	close(s.shutdown)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.shutdownRequested {
+		s.shutdownRequested = true
+		close(s.shutdown)
+	}
 }
 
 // setupAPIRoutes sets up HTTP API routes
@@ -249,13 +302,11 @@ func (s *Server) setupAPIRoutes() {
 		handlers.AllowedMethods([]string{"GET"}),
 	))
 
-	// Task routes
 	api.HandleFunc("/tasks", s.handleCreateTask).Methods("POST")
 	api.HandleFunc("/tasks", s.handleListTasks).Methods("GET")
 	api.HandleFunc("/tasks/{task_id}", s.handleGetTask).Methods("GET")
 	api.HandleFunc("/tasks/{task_id}", s.handleDeleteTask).Methods("DELETE")
 
-	// Queue routes
 	api.HandleFunc("/queues", s.handleCreateQueue).Methods("POST")
 	api.HandleFunc("/queues", s.handleListQueues).Methods("GET")
 	api.HandleFunc("/queues/{queue_name}", s.handleGetQueue).Methods("GET")
@@ -278,9 +329,29 @@ func (s *Server) setupAPIRoutes() {
 // setupWorkerRoutes sets up WebSocket and worker-specific routes
 func (s *Server) setupWorkerRoutes() {
 	// WebSocket endpoint
+	// @Summary Worker WebSocket connection
+	// @Description Establish WebSocket connection for workers
+	// @Tags workers
+	// @Accept json
+	// @Produce json
+	// @Success 101 {string} string "Switching Protocols"
+	// @Failure 400 {object} api.ErrorResponse
+	// @Router /worker/v1/ws [get]
 	s.wsRouter.HandleFunc("/worker/v1/ws", s.handleWorkerWebSocket)
 
 	// File download endpoint
+	// @Summary Download file
+	// @Description Download a file by ID (worker authentication required)
+	// @Tags files
+	// @Accept */*
+	// @Produce application/octet-stream
+	// @Param file_id path string true "File ID"
+	// @Success 200 {file} binary "File content"
+	// @Failure 400 {object} api.ErrorResponse
+	// @Failure 403 {object} api.ErrorResponse
+	// @Failure 404 {object} api.ErrorResponse
+	// @Failure 500 {object} api.ErrorResponse
+	// @Router /worker/v1/file/{file_id} [get]
 	s.wsRouter.HandleFunc("/worker/v1/file/{file_id}", s.handleFileDownload).Methods("GET")
 }
 
