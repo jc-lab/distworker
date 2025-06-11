@@ -118,7 +118,7 @@ controller:
       - infinity
 
   containerPorts:
-    api: 8081
+    api: 8080
     worker: 8081
 
   ## @param notificationService.replicaCount Number of main replicas to deploy
