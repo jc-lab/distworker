@@ -7,7 +7,7 @@ import modal
 
 app = modal.App("distworker-sample-worker")
 worker_image = modal.Image.debian_slim().pip_install(
-    "distworker-sdk==0.0.3rc2",
+    "distworker-sdk==0.0.3rc3",
     "protobuf>=4.31.1",
     "transformers>=4.35.0",
     "torch>=2.1.0",
