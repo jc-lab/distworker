@@ -7,18 +7,20 @@ A Python SDK for connecting workers to the DistWorker distributed task processin
 __version__ = "1.0.0"
 __author__ = "JC-Lab"
 
-from .client.worker import Worker
-from .client.task import Task
 from .client.exceptions import (
     DistWorkerError,
     ConnectionError,
     AuthenticationError,
     TaskError,
 )
+from .client.request import Request
+from .client.task import Task
+from .client.worker import Worker
 
 __all__ = [
     "Worker",
-    "Task", 
+    "Task",
+    "Request",
     "DistWorkerError",
     "ConnectionError",
     "AuthenticationError", 

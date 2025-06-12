@@ -51,7 +51,7 @@ func NewListener(
 }
 
 func (l *Listener) HandleConnection(conn *websocket.Conn) {
-	go l.serveConnection(conn)
+	l.serveConnection(conn)
 }
 
 func (l *Listener) serveConnection(conn *websocket.Conn) {

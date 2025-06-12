@@ -20,14 +20,17 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
+	"github.com/gin-gonic/gin"
 	"github.com/jc-lab/distworker/go/internal/protocol"
 	"github.com/jc-lab/distworker/go/internal/version"
 	"github.com/jc-lab/distworker/go/pkg/api"
 	"github.com/jc-lab/distworker/go/pkg/controller/database"
+	"github.com/jc-lab/distworker/go/pkg/controller/subscriber"
 	"github.com/jc-lab/distworker/go/pkg/healthchecker"
 	models2 "github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
+	errors2 "github.com/pkg/errors"
 	"io"
 	"log"
 	"mime/multipart"
@@ -37,8 +40,6 @@ import (
 	"net/http"
 	"strconv"
 	"time"
-
-	"github.com/gorilla/mux"
 )
 
 // handleCreateTask handles POST /api/v1/tasks
@@ -54,38 +55,71 @@ import (
 // @Failure 400 {object} api.ErrorResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /tasks [post]
-func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
-	contentType := r.Header.Get("Content-Type")
+func (s *Server) handleCreateTask(c *gin.Context) {
+	contentType := c.GetHeader("Content-Type")
 
 	// Check if it's multipart form data (file upload)
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		s.handleCreateTaskWithFiles(w, r)
+		s.handleCreateTaskWithFiles(c)
 		return
 	}
 
 	var wait int = 0
-	waitParam := r.URL.Query().Get("wait")
+	waitParam := c.Request.URL.Query().Get("wait")
 	if waitParam != "" {
 		var err error
 		wait, err = strconv.Atoi(waitParam)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 	}
 
 	// Handle JSON request
 	var request api.CreateTaskRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	task, listener, err := s.CreateTask(c.Request.Context(), &request, wait != 0)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if listener != nil {
+		var err error
+		var waitCtx context.Context
+		var waitCancel context.CancelFunc
+		if wait > 0 {
+			waitCtx, waitCancel = context.WithTimeout(c.Request.Context(), time.Duration(wait)*time.Millisecond)
+		} else {
+			waitCtx, waitCancel = context.WithCancel(c.Request.Context())
+		}
+		defer waitCancel()
+
+		newTask, err := listener.Wait(waitCtx)
+		if err != nil {
+			log.Printf("Task[%s] wait failed: %+v", task.Id, err)
+
+			newTask, err = s.db.GetTaskRepository().GetById(c.Request.Context(), task.Id)
+			if err != nil {
+				log.Printf("Task[%s] get failed: %+v", task.Id, err)
+			} else {
+				task = newTask
+			}
+		} else {
+			task = newTask
+		}
+	}
+
+	c.JSON(http.StatusOK, task)
+}
+func (s *Server) CreateTask(ctx context.Context, request *api.CreateTaskRequest, wait bool) (*models2.Task, subscriber.Listener[*models2.Task, *models2.TaskProgress], error) {
 	// Validate required fields
 	if request.Queue == "" {
-		http.Error(w, "queue is required", http.StatusBadRequest)
-		return
+		return nil, nil, errors.New("queue is required")
 	}
 
 	// Parse timeout
@@ -93,8 +127,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if request.Timeout != "" {
 		duration, err := time.ParseDuration(request.Timeout)
 		if err != nil {
-			http.Error(w, "Invalid timeout format", http.StatusBadRequest)
-			return
+			return nil, nil, errors2.Wrap(err, "invalid timeout format")
 		}
 		timeoutMS = duration.Milliseconds()
 	}
@@ -111,73 +144,54 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		MaxRetry:  request.Retry,
 	}
 
-	if err := s.db.GetTaskRepository().Create(r.Context(), task); err != nil {
-		http.Error(w, "Failed to create task", http.StatusInternalServerError)
-		return
+	var taskListener subscriber.Listener[*models2.Task, *models2.TaskProgress]
+
+	if wait {
+		var err error
+		taskListener, err = s.workerManager.GetTaskListener(task.Id)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
+	if err := s.db.GetTaskRepository().Create(ctx, task); err != nil {
+		return nil, nil, errors2.Wrap(err, "failed to create task")
+	}
 	s.workerManager.EnqueueTask(task)
 
-	if wait < 0 || wait > 0 {
-		var err error
-		var waitCtx context.Context
-		var waitCancel context.CancelFunc
-		if wait > 0 {
-			waitCtx, waitCancel = context.WithTimeout(r.Context(), time.Duration(wait)*time.Millisecond)
-		} else {
-			waitCtx, waitCancel = context.WithCancel(r.Context())
-		}
-		defer waitCancel()
-
-		newTask, err := s.workerManager.WaitTask(waitCtx, task.Id)
-		if err != nil {
-			log.Printf("Task[%s] wait failed: %+v", task.Id, err)
-
-			task, err = s.db.GetTaskRepository().GetById(r.Context(), task.Id)
-			if err != nil {
-				log.Printf("get task[%s] failed: %+v", task.Id, err)
-				http.Error(w, "Task not found", http.StatusNotFound)
-				return
-			}
-		} else {
-			task = newTask
-		}
-	}
-
-	writeJson(w, http.StatusOK, task)
+	return task, taskListener, nil
 }
 
 // handleCreateTaskWithFiles handles POST /api/v1/tasks with file uploads
-func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateTaskWithFiles(c *gin.Context) {
 	// Parse multipart form
-	err := r.ParseMultipartForm(32 << 20) // 32MB max memory
+	err := c.Request.ParseMultipartForm(32 << 20) // 32MB max memory
 	if err != nil {
-		http.Error(w, "Failed to parse multipart form", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to parse multipart form"})
 		return
 	}
 
 	defer func() {
-		_ = r.MultipartForm.RemoveAll()
+		_ = c.Request.MultipartForm.RemoveAll()
 	}()
 
 	// Get task data from form
-	taskDataStr := r.FormValue("task")
+	taskDataStr := c.Request.FormValue("task")
 	if taskDataStr == "" {
-		http.Error(w, "task field is required", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "task field is required"})
 		return
 	}
 
 	// Parse task JSON
 	var request api.CreateTaskRequest
-
-	if err := json.Unmarshal([]byte(taskDataStr), &request); err != nil {
-		http.Error(w, "Invalid task JSON", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Validate required fields
 	if request.Queue == "" {
-		http.Error(w, "queue is required", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "queue is required"})
 		return
 	}
 
@@ -186,7 +200,7 @@ func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Reques
 	if request.Timeout != "" {
 		duration, err := time.ParseDuration(request.Timeout)
 		if err != nil {
-			http.Error(w, "Invalid timeout format", http.StatusBadRequest)
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid timeout format"})
 			return
 		}
 		timeoutMS = duration.Milliseconds()
@@ -194,12 +208,12 @@ func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Reques
 
 	// Handle file uploads
 	var fileInfos []models2.FileInfo
-	if r.MultipartForm != nil && r.MultipartForm.File != nil {
-		for fieldName, fileHeaders := range r.MultipartForm.File {
+	if c.Request.MultipartForm != nil && c.Request.MultipartForm.File != nil {
+		for fieldName, fileHeaders := range c.Request.MultipartForm.File {
 			for _, fileHeader := range fileHeaders {
-				fileInfo, err := s.uploadFile(r, fieldName, fileHeader)
+				fileInfo, err := s.uploadFile(c.Request, fieldName, fileHeader)
 				if err != nil {
-					http.Error(w, "Failed to upload file: "+err.Error(), http.StatusInternalServerError)
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file: " + err.Error()})
 					return
 				}
 				fileInfos = append(fileInfos, *fileInfo)
@@ -219,15 +233,15 @@ func (s *Server) handleCreateTaskWithFiles(w http.ResponseWriter, r *http.Reques
 		CreatedAt: models2.Now(),
 	}
 
-	if err := s.db.GetTaskRepository().Create(r.Context(), task); err != nil {
-		http.Error(w, "Failed to create task", http.StatusInternalServerError)
+	if err := s.db.GetTaskRepository().Create(c.Request.Context(), task); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task"})
 		return
 	}
 
 	// Try to assign the task to an available worker
 	s.workerManager.EnqueueTask(task)
 
-	writeJson(w, http.StatusOK, task)
+	c.JSON(http.StatusOK, task)
 }
 
 // uploadFile uploads a single file to storage
@@ -289,17 +303,16 @@ func (s *Server) uploadFile(r *http.Request, fieldName string, fileHeader *multi
 // @Success 200 {object} models.Task
 // @Failure 404 {object} api.ErrorResponse
 // @Router /tasks/{task_id} [get]
-func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	taskId := vars["task_id"]
+func (s *Server) handleGetTask(c *gin.Context) {
+	taskId := c.Param("task_id")
 
-	task, err := s.db.GetTaskRepository().GetById(r.Context(), taskId)
+	task, err := s.db.GetTaskRepository().GetById(c.Request.Context(), taskId)
 	if err != nil {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
 
-	writeJson(w, http.StatusOK, task)
+	c.JSON(http.StatusOK, task)
 }
 
 // handleListTasks handles GET /api/v1/tasks
@@ -316,12 +329,12 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} api.ListTasksResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /tasks [get]
-func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListTasks(c *gin.Context) {
 	// Parse query parameters
-	queue := r.URL.Query().Get("queue")
-	status := r.URL.Query().Get("status")
-	pageStr := r.URL.Query().Get("page")
-	limitStr := r.URL.Query().Get("limit")
+	queue := c.Request.URL.Query().Get("queue")
+	status := c.Request.URL.Query().Get("status")
+	pageStr := c.Request.URL.Query().Get("page")
+	limitStr := c.Request.URL.Query().Get("limit")
 
 	page := 1
 	if pageStr != "" {
@@ -343,9 +356,9 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = status
 
-	tasks, total, err := s.db.GetTaskRepository().List(r.Context(), filter, page, limit)
+	tasks, total, err := s.db.GetTaskRepository().List(c.Request.Context(), filter, page, limit)
 	if err != nil {
-		http.Error(w, "Failed to list tasks", http.StatusInternalServerError)
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to list tasks"})
 		return
 	}
 
@@ -361,7 +374,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	writeJson(w, http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleDeleteTask handles DELETE /api/v1/tasks/{task_id}
@@ -376,20 +389,19 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} api.ErrorResponse
 // @Failure 404 {object} api.ErrorResponse
 // @Router /tasks/{task_id} [delete]
-func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	taskId := vars["task_id"]
+func (s *Server) handleDeleteTask(c *gin.Context) {
+	taskId := c.Param("task_id")
 
 	// Get task first to check if it exists and can be cancelled
-	task, err := s.db.GetTaskRepository().GetById(r.Context(), taskId)
+	task, err := s.db.GetTaskRepository().GetById(c.Request.Context(), taskId)
 	if err != nil {
-		http.Error(w, "Task not found", http.StatusNotFound)
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 		return
 	}
 
 	// Only allow cancellation of pending or processing tasks
 	if task.Status != types.TaskStatusPending && task.Status != types.TaskStatusProcessing {
-		http.Error(w, "Task cannot be cancelled", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Task cannot be cancelled"})
 		return
 	}
 
@@ -401,8 +413,8 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 	}
 	task.CompletedAt = models2.NowPtr()
 
-	if err := s.db.GetTaskRepository().Update(r.Context(), task); err != nil {
-		http.Error(w, "Failed to cancel task", http.StatusInternalServerError)
+	if err := s.db.GetTaskRepository().Update(c.Request.Context(), task); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel task"})
 		return
 	}
 
@@ -411,7 +423,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		Status: task.Status,
 	}
 
-	writeJson(w, http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleCreateQueue handles POST /api/v1/queues
@@ -427,16 +439,15 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} api.ErrorResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /queues [post]
-func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateQueue(c *gin.Context) {
 	var request api.CreateQueueRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	if request.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
 
@@ -448,12 +459,12 @@ func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   models2.Now(),
 	}
 
-	if err := s.db.GetQueueRepository().Create(r.Context(), queue); err != nil {
-		http.Error(w, "Failed to create queue", http.StatusInternalServerError)
+	if err := s.db.GetQueueRepository().Create(c.Request.Context(), queue); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to create queue"})
 		return
 	}
 
-	writeJson(w, http.StatusOK, queue)
+	c.JSON(http.StatusOK, queue)
 }
 
 // handleListQueues handles GET /api/v1/queues
@@ -466,10 +477,10 @@ func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} api.ListQueuesResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /queues [get]
-func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
-	queues, err := s.db.GetQueueRepository().List(r.Context())
+func (s *Server) handleListQueues(c *gin.Context) {
+	queues, err := s.db.GetQueueRepository().List(c.Request.Context())
 	if err != nil {
-		http.Error(w, "Failed to list queues", http.StatusInternalServerError)
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to list queues"})
 		return
 	}
 
@@ -477,7 +488,7 @@ func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
 		Queues: queues,
 	}
 
-	writeJson(w, http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleGetQueue handles GET /api/v1/queues/{queue_name}
@@ -491,17 +502,16 @@ func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} models.Queue
 // @Failure 404 {object} api.ErrorResponse
 // @Router /queues/{queue_name} [get]
-func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	queueName := vars["queue_name"]
+func (s *Server) handleGetQueue(c *gin.Context) {
+	queueName := c.Param("queue_name")
 
-	queue, err := s.db.GetQueueRepository().GetByName(r.Context(), queueName)
+	queue, err := s.db.GetQueueRepository().GetByName(c.Request.Context(), queueName)
 	if err != nil {
-		http.Error(w, "Queue not found", http.StatusNotFound)
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Queue not found"})
 		return
 	}
 
-	writeJson(w, http.StatusOK, queue)
+	c.JSON(http.StatusOK, queue)
 }
 
 // handleUpdateQueue handles PUT /api/v1/queues/{queue_name}
@@ -518,32 +528,30 @@ func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {object} api.ErrorResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /queues/{queue_name} [put]
-func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	queueName := vars["queue_name"]
+func (s *Server) handleUpdateQueue(c *gin.Context) {
+	queueName := c.Param("queue_name")
 
-	queue, err := s.db.GetQueueRepository().GetByName(r.Context(), queueName)
+	queue, err := s.db.GetQueueRepository().GetByName(c.Request.Context(), queueName)
 	if err != nil {
-		http.Error(w, "Queue not found", http.StatusNotFound)
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "Queue not found"})
 		return
 	}
 
 	var request api.UpdateQueueRequest
-
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	queue.Description = request.Description
 	queue.UpdatedAt = models2.Now()
 
-	if err := s.db.GetQueueRepository().Update(r.Context(), queue); err != nil {
-		http.Error(w, "Failed to update queue", http.StatusInternalServerError)
+	if err := s.db.GetQueueRepository().Update(c.Request.Context(), queue); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to update queue"})
 		return
 	}
 
-	writeJson(w, http.StatusOK, queue)
+	c.JSON(http.StatusOK, queue)
 }
 
 // handleDeleteQueue handles DELETE /api/v1/queues/{queue_name}
@@ -557,12 +565,11 @@ func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} api.DeleteQueueResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /queues/{queue_name} [delete]
-func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	queueName := vars["queue_name"]
+func (s *Server) handleDeleteQueue(c *gin.Context) {
+	queueName := c.Param("queue_name")
 
-	if err := s.db.GetQueueRepository().Delete(r.Context(), queueName); err != nil {
-		http.Error(w, "Failed to delete queue", http.StatusInternalServerError)
+	if err := s.db.GetQueueRepository().Delete(c.Request.Context(), queueName); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete queue"})
 		return
 	}
 
@@ -570,7 +577,7 @@ func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 		Status: "deleted",
 	}
 
-	writeJson(w, http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleGetQueueStats handles GET /api/v1/queues/{queue_name}/stats
@@ -584,9 +591,9 @@ func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} models.QueueStats
 // @Failure 501 {object} api.ErrorResponse
 // @Router /queues/{queue_name}/stats [get]
-func (s *Server) handleGetQueueStats(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetQueueStats(c *gin.Context) {
 	// TODO: Implement queue statistics
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{"error": "Not implemented"})
 }
 
 // handleListWorkers handles GET /api/v1/workers
@@ -599,10 +606,10 @@ func (s *Server) handleGetQueueStats(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} api.ListWorkersResponse
 // @Failure 500 {object} api.ErrorResponse
 // @Router /workers [get]
-func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
-	sessions, err := s.db.GetWorkerSessionRepository().List(r.Context())
+func (s *Server) handleListWorkers(c *gin.Context) {
+	sessions, err := s.db.GetWorkerSessionRepository().List(c.Request.Context())
 	if err != nil {
-		http.Error(w, "Failed to list workers", http.StatusInternalServerError)
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to list workers"})
 		return
 	}
 
@@ -615,7 +622,7 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 		Workers: workers,
 	}
 
-	writeJson(w, http.StatusOK, response)
+	c.JSON(http.StatusOK, response)
 }
 
 // handleDeleteWorker handles DELETE /api/v1/workers/{worker_id}
@@ -629,9 +636,9 @@ func (s *Server) handleListWorkers(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} api.DeleteWorkerResponse
 // @Failure 501 {object} api.ErrorResponse
 // @Router /workers/{worker_id} [delete]
-func (s *Server) handleDeleteWorker(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteWorker(c *gin.Context) {
 	// TODO: Implement worker disconnection
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{"error": "Not implemented"})
 }
 
 // handleListProvisioners handles GET /api/v1/provisioners
@@ -644,9 +651,9 @@ func (s *Server) handleDeleteWorker(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} models.Provisioner
 // @Failure 501 {object} api.ErrorResponse
 // @Router /provisioners [get]
-func (s *Server) handleListProvisioners(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListProvisioners(c *gin.Context) {
 	// TODO: Implement provisioner listing
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	c.AbortWithStatusJSON(http.StatusNotImplemented, gin.H{"error": "Not implemented"})
 }
 
 // handleHealth handles GET /health
@@ -659,14 +666,14 @@ func (s *Server) handleListProvisioners(w http.ResponseWriter, r *http.Request) 
 // @Success 200 {object} api.HealthResponse
 // @Failure 503 {object} api.HealthResponse
 // @Router /health [get]
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleHealth(c *gin.Context) {
 	response := &api.HealthResponse{
 		Timestamp: time.Now().UnixMilli(),
 		Version:   version.Version,
 		Details:   make(map[string]*api.HealthDetail),
 	}
 
-	response.Details, response.Status = healthchecker.Check(r.Context(), []healthchecker.Checkable{
+	response.Details, response.Status = healthchecker.Check(c.Request.Context(), []healthchecker.Checkable{
 		&healthchecker.Feature{
 			Name:        "mongodb",
 			HealthFunc:  s.db.Health,
@@ -679,9 +686,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		},
 	}, time.Second)
 	if response.Status == types.HealthStatusDown {
-		writeJson(w, http.StatusServiceUnavailable, response)
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, response)
 	} else {
-		writeJson(w, http.StatusOK, response)
+		c.JSON(http.StatusOK, response)
 	}
 }
 
@@ -694,23 +701,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // @Produce text/plain
 // @Success 200 {string} string "Prometheus metrics"
 // @Router /metrics [get]
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleMetrics(c *gin.Context) {
 	// Collect latest metrics from database before serving
 	if s.metrics != nil {
-		s.metrics.CollectDatabaseStats(r.Context(), s.db)
-		s.metrics.CollectWorkerStats(r.Context(), s.workerManager)
+		s.metrics.CollectDatabaseStats(c.Request.Context(), s.db)
+		s.metrics.CollectWorkerStats(c.Request.Context(), s.workerManager)
 	}
 
 	// Serve Prometheus metrics
-	s.metricsHandler.ServeHTTP(w, r)
+	s.metricsHandler.ServeHTTP(c.Writer, c.Request)
 }
 
 // handleWorkerWebSocket handles WebSocket connections from workers
-func (s *Server) handleWorkerWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleWorkerWebSocket(c *gin.Context) {
 	// Upgrade HTTP connection to WebSocket
-	conn, err := s.upgrader.Upgrade(w, r, nil)
+	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		http.Error(w, "Failed to upgrade to WebSocket", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Failed to upgrade to WebSocket"})
 		return
 	}
 
@@ -719,61 +726,51 @@ func (s *Server) handleWorkerWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFileDownload handles GET /worker/v1/file/{file_id}
-func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	fileId := vars["file_id"]
+func (s *Server) handleFileDownload(c *gin.Context) {
+	fileId := c.Param("file_id")
 
-	vctx, err := protocol.NewValidateContext(r)
+	vctx, err := protocol.NewValidateContext(c.Request)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	workerInfo, err := s.db.GetWorkerSessionRepository().GetById(r.Context(), vctx.WorkerId)
+	workerInfo, err := s.db.GetWorkerSessionRepository().GetById(c.Request.Context(), vctx.WorkerId)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	if err = vctx.ValidateSignature(workerInfo.WorkerToken); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 	if fileId == "" {
-		http.Error(w, "file_id is required", http.StatusBadRequest)
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "file_id is required"})
 		return
 	}
 
 	// Download file from storage
-	reader, fileInfo, err := s.storage.Download(r.Context(), fileId)
+	reader, fileInfo, err := s.storage.Download(c.Request.Context(), fileId)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			http.Error(w, "File not found", http.StatusNotFound)
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "File not found"})
 		} else {
-			http.Error(w, "Failed to download file: "+err.Error(), http.StatusInternalServerError)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to download file: " + err.Error()})
 		}
 		return
 	}
 	defer reader.Close()
 
 	// Set response headers
-	w.Header().Set("Content-Type", fileInfo.ContentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(fileInfo.Size, 10))
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+fileInfo.Filename+"\"")
-
-	w.WriteHeader(http.StatusOK)
+	c.Header("Content-Type", fileInfo.ContentType)
+	c.Header("Content-Length", strconv.FormatInt(fileInfo.Size, 10))
+	c.Header("Content-Disposition", "attachment; filename=\""+fileInfo.Filename+"\"")
+	c.Status(http.StatusOK)
 
 	// Stream file content
-	_, err = io.Copy(w, reader)
+	_, err = io.Copy(c.Writer, reader)
 	if err != nil {
 		// Log error but don't send HTTP error as headers are already sent
 		// log.Printf("Error streaming file: %v", err)
 		return
 	}
-}
-
-func writeJson(w http.ResponseWriter, statusCode int, data interface{}) {
-	bytes, _ := json.Marshal(data)
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(bytes)), 10))
-	w.WriteHeader(statusCode)
-	_, _ = w.Write(bytes)
 }

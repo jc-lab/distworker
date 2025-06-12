@@ -35,7 +35,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gorilla/handlers"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/jc-lab/distworker/go/internal/provisioner"
 	"github.com/jc-lab/distworker/go/internal/version"
 	config2 "github.com/jc-lab/distworker/go/pkg/controller/config"
@@ -48,7 +49,8 @@ import (
 	"github.com/jc-lab/distworker/go/pkg/types"
 	errors2 "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	httpSwagger "github.com/swaggo/http-swagger/v2"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/zap"
 	"log"
 	"net"
@@ -57,7 +59,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -72,9 +73,9 @@ type Server struct {
 	rootLogger *zap.Logger
 	logger     *zap.SugaredLogger
 
-	router   *mux.Router
-	wsRouter *mux.Router
-	upgrader websocket.Upgrader
+	apiServer    *gin.Engine
+	workerServer *gin.Engine
+	upgrader     websocket.Upgrader
 
 	// Metrics
 	metrics        *metrics.Metrics
@@ -108,10 +109,10 @@ func NewServer(config *config2.Config, options ...Option) (*Server, error) {
 
 	// Create server
 	server := &Server{
-		config:   config,
-		router:   mux.NewRouter(),
-		wsRouter: mux.NewRouter(),
-		metrics:  appMetrics,
+		config:       config,
+		apiServer:    gin.Default(),
+		workerServer: gin.Default(),
+		metrics:      appMetrics,
 		metricsHandler: promhttp.InstrumentMetricHandler(
 			promRegistry, promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{}),
 		),
@@ -186,19 +187,16 @@ func (s *Server) Start() error {
 	// Start API server
 	apiServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.Server.API.Port),
-		Handler:      s.router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Handler:      s.apiServer.Handler(),
+		ReadTimeout:  time.Duration(s.config.Server.API.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(s.config.Server.API.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(s.config.Server.API.IdleTimeout) * time.Second,
 	}
 
 	// Start Worker server
 	workerServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.config.Server.Worker.Port),
-		Handler:      s.wsRouter,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    fmt.Sprintf(":%d", s.config.Server.Worker.Port),
+		Handler: s.workerServer.Handler(),
 	}
 
 	if s.config.ControllerSetting.WorkerAccessibleBaseUrl == "" {
@@ -221,13 +219,6 @@ func (s *Server) Start() error {
 	// Start servers in goroutines
 	go func() {
 		defer apiListener.Close()
-
-		s.router.PathPrefix("/swagger/").Handler(httpSwagger.Handler(
-			//httpSwagger.URL("/swagger/doc.json"),
-			httpSwagger.DeepLinking(true),
-			httpSwagger.DocExpansion("none"),
-			httpSwagger.DomID("swagger-ui"),
-		)).Methods(http.MethodGet)
 
 		log.Printf("Starting API server on port %d", s.config.Server.API.Port)
 		if err := apiServer.Serve(apiListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -297,33 +288,45 @@ func (s *Server) Stop() {
 
 // setupAPIRoutes sets up HTTP API routes
 func (s *Server) setupAPIRoutes() {
-	api := s.router.PathPrefix("/api/v1").Subrouter()
-	api.Use(handlers.CORS(
-		handlers.AllowedMethods([]string{"GET"}),
-	))
+	api := s.apiServer.Group("/api/v1")
+	api.Use(cors.New(cors.Config{
+		AllowMethods:    []string{"GET"},
+		AllowAllOrigins: true,
+	}))
 
-	api.HandleFunc("/tasks", s.handleCreateTask).Methods("POST")
-	api.HandleFunc("/tasks", s.handleListTasks).Methods("GET")
-	api.HandleFunc("/tasks/{task_id}", s.handleGetTask).Methods("GET")
-	api.HandleFunc("/tasks/{task_id}", s.handleDeleteTask).Methods("DELETE")
+	api.POST("/tasks", s.handleCreateTask)
+	api.GET("/tasks", s.handleListTasks)
+	api.GET("/tasks/{task_id}", s.handleGetTask)
+	api.DELETE("/tasks/{task_id}", s.handleDeleteTask)
 
-	api.HandleFunc("/queues", s.handleCreateQueue).Methods("POST")
-	api.HandleFunc("/queues", s.handleListQueues).Methods("GET")
-	api.HandleFunc("/queues/{queue_name}", s.handleGetQueue).Methods("GET")
-	api.HandleFunc("/queues/{queue_name}", s.handleUpdateQueue).Methods("PUT")
-	api.HandleFunc("/queues/{queue_name}", s.handleDeleteQueue).Methods("DELETE")
-	api.HandleFunc("/queues/{queue_name}/stats", s.handleGetQueueStats).Methods("GET")
+	api.POST("/queues", s.handleCreateQueue)
+	api.GET("/queues", s.handleListQueues)
+	api.GET("/queues/{queue_name}", s.handleGetQueue)
+	api.PUT("/queues/{queue_name}", s.handleUpdateQueue)
+	api.DELETE("/queues/{queue_name}", s.handleDeleteQueue)
+	api.GET("/queues/{queue_name}/stats", s.handleGetQueueStats)
 
 	// Worker routes
-	api.HandleFunc("/workers", s.handleListWorkers).Methods("GET")
-	api.HandleFunc("/workers/{worker_id}", s.handleDeleteWorker).Methods("DELETE")
+	api.GET("/workers", s.handleListWorkers)
+	api.DELETE("/workers/{worker_id}", s.handleDeleteWorker)
 
 	// Provisioner routes
-	api.HandleFunc("/provisioners", s.handleListProvisioners).Methods("GET")
+	api.GET("/provisioners", s.handleListProvisioners)
+
+	// OpenAI Compatibility routes
+	if s.config.Server.API.OpenAi.Enabled {
+		openaiRouter := s.apiServer.Group("/openai")
+		openaiRouter.POST("/v1/chat/completions", s.openaiChatHandler)
+		openaiRouter.POST("/v1/completions", s.openaiGenerateHandler)
+		openaiRouter.POST("/v1/embeddings", s.openaiEmbedHandler)
+	}
 
 	// Health routes
-	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
-	s.router.HandleFunc("/metrics", s.handleMetrics).Methods("GET")
+	s.apiServer.GET("/health", s.handleHealth)
+	s.apiServer.GET("/metrics", s.handleMetrics)
+
+	// Swagger routes
+	s.apiServer.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 }
 
 // setupWorkerRoutes sets up WebSocket and worker-specific routes
@@ -337,7 +340,7 @@ func (s *Server) setupWorkerRoutes() {
 	// @Success 101 {string} string "Switching Protocols"
 	// @Failure 400 {object} api.ErrorResponse
 	// @Router /worker/v1/ws [get]
-	s.wsRouter.HandleFunc("/worker/v1/ws", s.handleWorkerWebSocket)
+	s.workerServer.GET("/worker/v1/ws", s.handleWorkerWebSocket)
 
 	// File download endpoint
 	// @Summary Download file
@@ -352,7 +355,7 @@ func (s *Server) setupWorkerRoutes() {
 	// @Failure 404 {object} api.ErrorResponse
 	// @Failure 500 {object} api.ErrorResponse
 	// @Router /worker/v1/file/{file_id} [get]
-	s.wsRouter.HandleFunc("/worker/v1/file/{file_id}", s.handleFileDownload).Methods("GET")
+	s.workerServer.GET("/worker/v1/file/{file_id}", s.handleFileDownload)
 }
 
 // initializeQueues creates predefined queues from configuration

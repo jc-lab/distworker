@@ -16,7 +16,8 @@ import websockets
 from websockets.exceptions import ConnectionClosed, InvalidStatusCode
 
 from .auth import generate_websocket_signature, DATE_ONLY_FORMAT, DATE_FORMAT
-from .exceptions import ConnectionError, AuthenticationError, TaskError, ProtocolError
+from .exceptions import ConnectionError, AuthenticationError, ProtocolError
+from .request import Request
 from .task import Task
 from ..protocol import protocol_pb2
 
@@ -30,7 +31,7 @@ class Worker:
     Connects to the DistWorker controller and processes assigned tasks.
     """
 
-    task_handler: Callable[[Task], Awaitable[Dict[str, Any]]]
+    task_handler: Callable[[Request], Awaitable[Dict[str, Any]]]
     
     def __init__(
         self,
@@ -81,7 +82,7 @@ class Worker:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._connection_task: Optional[asyncio.Task] = None
 
-    async def _default_task_handler(self, task: Task) -> Dict[str, Any]:
+    async def _default_task_handler(self, req: Request) -> Dict[str, Any]:
         raise NotImplementedError()
 
     async def run(self):
@@ -334,13 +335,15 @@ class Worker:
                     'storage_url': f.storage_url
                 } for f in task_assign.files]
             )
-            
+
+            req = Request(task = task)
+
             self.current_task = task
 
             logger.info(f"Processing task {task.task_id} from queue {task.queue}")
             
             # Process task in background
-            asyncio.create_task(self._process_task(task))
+            asyncio.create_task(self._process_task(req))
             
         except Exception as e:
             logger.error(f"Task assignment error: {e}")
@@ -376,19 +379,46 @@ class Worker:
         else:
             return False
             
-    async def _process_task(self, task: Task):
+    async def _process_task(self, req: Request):
         """Process task with handler"""
         try:
+            task_id = req.task.task_id
+
+            progress_queue = asyncio.Queue()
+
+            async def progress_worker():
+                while True:
+                    try:
+                        item = await progress_queue.get()
+                        if item is None: # Exit signal
+                            break
+
+                        progress, message, data = item
+                        await self._send_task_progress(task_id, progress, message, data)
+                    except Exception as e:
+                        logger.error(f"Error processing progress for task {task_id}: {e}")
+                    finally:
+                        progress_queue.task_done()
+
+            def send_progress(progress: float, message: str = "", data: Optional[Dict] = None):
+                progress_queue.put_nowait((progress, message, data))
+
+            req._send_progress = send_progress
+
             # Call task handler
-            result = await self.task_handler(task)
+            asyncio.create_task(progress_worker())
+            result = await self.task_handler(req)
+
+            await progress_queue.join()
+            await progress_queue.put(None)  # Exit signal
             
             # Send completion
-            await self._send_task_complete(task.task_id, result)
-            logger.info(f"Task {task.task_id} completed successfully")
+            await self._send_task_complete(task_id, result)
+            logger.info(f"Task {task_id} completed successfully")
             
         except Exception as e:
-            logger.error(f"Task {task.task_id} failed: {e}")
-            await self._send_task_failed(task.task_id, "HANDLER_ERROR", str(e))
+            logger.error(f"Task {task_id} failed: {e}")
+            await self._send_task_failed(task_id, "HANDLER_ERROR", str(e))
         finally:
             self.current_task = None
             self.last_processed = time.monotonic()
@@ -476,17 +506,3 @@ class Worker:
             await self.websocket.send(data)
         except Exception as e:
             raise ConnectionError(f"Failed to send message: {e}")
-            
-    async def send_task_progress(self, progress: float, message: str = "", data: Optional[Dict] = None):
-        """
-        Send progress update for current task
-        
-        Args:
-            progress: Progress percentage (0.0 to 100.0)
-            message: Optional progress message
-            data: Optional progress data
-        """
-        if not self.current_task:
-            raise TaskError("No current task to update progress for")
-            
-        await self._send_task_progress(self.current_task.task_id, progress, message, data)

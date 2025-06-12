@@ -49,6 +49,11 @@ type Task struct {
 	WebhookUrl  string                 `bson:"webhook_url" json:"webhook_url"`
 }
 
+type TaskProgress struct {
+	Message string
+	Data    map[string]interface{}
+}
+
 // TaskError represents an error that occurred during task execution
 type TaskError struct {
 	Code    types.TaskErrorCode    `bson:"code" json:"code"`
