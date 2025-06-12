@@ -188,18 +188,15 @@ func (s *Server) Start() error {
 	apiServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.config.Server.API.Port),
 		Handler:      s.apiServer.Handler(),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  time.Duration(s.config.Server.API.ReadTimeout) * time.Second,
+		WriteTimeout: time.Duration(s.config.Server.API.WriteTimeout) * time.Second,
+		IdleTimeout:  time.Duration(s.config.Server.API.IdleTimeout) * time.Second,
 	}
 
 	// Start Worker server
 	workerServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.config.Server.Worker.Port),
-		Handler:      s.workerServer.Handler(),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    fmt.Sprintf(":%d", s.config.Server.Worker.Port),
+		Handler: s.workerServer.Handler(),
 	}
 
 	if s.config.ControllerSetting.WorkerAccessibleBaseUrl == "" {

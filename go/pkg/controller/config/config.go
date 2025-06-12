@@ -68,8 +68,11 @@ type ServerConfig struct {
 
 // APIConfig represents API server configuration
 type APIConfig struct {
-	Port   int             `koanf:"port"`
-	OpenAi OpenAiApiConfig `koanf:"openai"`
+	Port         int             `koanf:"port"`
+	ReadTimeout  int             `koanf:"read_timeout"`
+	WriteTimeout int             `koanf:"write_timeout"`
+	IdleTimeout  int             `koanf:"idle_timeout"`
+	OpenAi       OpenAiApiConfig `koanf:"openai"`
 }
 
 type OpenAiApiConfig struct {
