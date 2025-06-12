@@ -21,4 +21,9 @@
 
 package distworker
 
+import (
+	_ "github.com/go-swagger/go-swagger/cmd/swagger"
+	_ "github.com/swaggo/swag"
+)
+
 //go:generate swag i -d ./go/pkg/controller/ -g server.go -o ./go/cmd/controller/docs/ --parseDependency --parseInternal

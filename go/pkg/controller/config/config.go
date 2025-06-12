@@ -68,7 +68,15 @@ type ServerConfig struct {
 
 // APIConfig represents API server configuration
 type APIConfig struct {
-	Port int `koanf:"port"`
+	Port   int             `koanf:"port"`
+	OpenAi OpenAiApiConfig `koanf:"openai"`
+}
+
+type OpenAiApiConfig struct {
+	Enabled              bool   `koanf:"enabled"`
+	ChatCompletionsQueue string `koanf:"chat_completions_queue"`
+	CompletionsQueue     string `koanf:"completions_queue"`
+	EmbeddingsQueue      string `koanf:"embeddings_queue"`
 }
 
 // WorkerConfig represents worker server configuration

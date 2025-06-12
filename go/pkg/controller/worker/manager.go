@@ -30,7 +30,7 @@ import (
 	"github.com/jc-lab/distworker/go/internal/worker"
 	"github.com/jc-lab/distworker/go/pkg/controller/config"
 	"github.com/jc-lab/distworker/go/pkg/controller/database"
-	"github.com/jc-lab/distworker/go/pkg/controller/eventbus"
+	"github.com/jc-lab/distworker/go/pkg/controller/subscriber"
 	models2 "github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/jc-lab/distworker/go/pkg/types"
 	"github.com/pkg/errors"
@@ -63,7 +63,7 @@ type Manager struct {
 
 	queueConsuming   bool
 	taskAssignQueues [queueBuckets]*blocking_dequeue.BlockingDequeue[*models2.Task]
-	taskEventBus     eventbus.Bus[*models2.Task]
+	taskEventBus     subscriber.Bus[*models2.Task, *models2.TaskProgress]
 
 	processingTasks map[string]*models2.Task
 
@@ -86,7 +86,7 @@ func NewManager(rootCtx context.Context, db database.Database, provisionerManage
 
 		connections:     make(map[string]Connection),
 		taskAssignChan:  make(chan *models2.Task, 100),
-		taskEventBus:    eventbus.New[*models2.Task](),
+		taskEventBus:    subscriber.New[*models2.Task, *models2.TaskProgress](),
 		processingTasks: make(map[string]*models2.Task),
 
 		httpClient: &http.Client{
@@ -379,8 +379,8 @@ func (wm *Manager) WaitForWorkerReady(ctx context.Context, workerId string) (wor
 	}
 }
 
-func (wm *Manager) WaitTask(ctx context.Context, taskId string) (*models2.Task, error) {
-	return wm.taskEventBus.Listen(ctx, taskId)
+func (wm *Manager) GetTaskListener(taskId string) (subscriber.Listener[*models2.Task, *models2.TaskProgress], error) {
+	return wm.taskEventBus.Listener(taskId)
 }
 
 func (wm *Manager) workerIsIdle(conn Connection) bool {
@@ -489,11 +489,13 @@ func (wm *Manager) handleTaskProgress(conn Connection, progress *protocol2.TaskP
 	if task.Metadata == nil {
 		task.Metadata = make(map[string]interface{})
 	}
-	task.Metadata["progress"] = progress.Progress
-	task.Metadata["progress_message"] = progress.Message
 
 	if progress.Data != nil {
-		task.Metadata["progress_data"] = progress.Data.AsMap()
+		taskProgress := &models2.TaskProgress{
+			Message: progress.Message,
+			Data:    progress.GetData().AsMap(),
+		}
+		wm.taskEventBus.EmitProgress(task.Id, taskProgress)
 	}
 
 	return wm.db.GetTaskRepository().Update(wm.ctx, task)
@@ -695,7 +697,7 @@ func (wm *Manager) taskComplete(task *models2.Task) {
 
 	_ = taskRepository.Update(wm.ctx, task)
 
-	wm.taskEventBus.Publish(task.Id, task)
+	wm.taskEventBus.Finish(task.Id, task)
 
 	if task.Status == types.TaskStatusPending && wm.queueConsuming {
 		wm.EnqueueTask(task)
