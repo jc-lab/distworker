@@ -24,9 +24,11 @@ spec:
       app.kubernetes.io/component: controller
   template:
     metadata:
-      {{- if $controller.podAnnotations }}
-      annotations: {{- include "common.tplvalues.render" (dict "value" $controller.podAnnotations "context" $) | nindent 8 }}
-      {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+        {{- if $controller.podAnnotations }}
+        {{- include "common.tplvalues.render" (dict "value" $controller.podAnnotations "context" $) | nindent 8 }}
+        {{- end }}
       labels: {{- include "common.labels.standard" . | nindent 8 }}
         app.kubernetes.io/component: controller
         {{- if $controller.podLabels }}
@@ -148,7 +150,7 @@ spec:
           {{- if $controller.livenessProbe.enabled }}
           livenessProbe: {{- include "common.tplvalues.render" (dict "value" (omit $controller.livenessProbe "enabled") "context" $) | nindent 12 }}
             httpGet:
-              path: /api/v1/health
+              path: /health
               port: api
               scheme: HTTP
           {{- else if $controller.customLivenessProbe }}
