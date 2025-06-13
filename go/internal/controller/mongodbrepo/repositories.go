@@ -53,7 +53,7 @@ func (r *TaskRepository) GetById(ctx context.Context, taskId string) (*models2.T
 	var task models2.Task
 	err := r.db.TasksCollection().FindOne(ctx, bson.M{"_id": taskId}).Decode(&task)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, fmt.Errorf("task not found")
 		}
 		return nil, err

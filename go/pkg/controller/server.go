@@ -297,19 +297,19 @@ func (s *Server) setupAPIRoutes() {
 
 	api.POST("/tasks", s.handleCreateTask)
 	api.GET("/tasks", s.handleListTasks)
-	api.GET("/tasks/{task_id}", s.handleGetTask)
-	api.DELETE("/tasks/{task_id}", s.handleDeleteTask)
+	api.GET("/tasks/:task_id", s.handleGetTask)
+	api.DELETE("/tasks/:task_id", s.handleDeleteTask)
 
 	api.POST("/queues", s.handleCreateQueue)
 	api.GET("/queues", s.handleListQueues)
-	api.GET("/queues/{queue_name}", s.handleGetQueue)
-	api.PUT("/queues/{queue_name}", s.handleUpdateQueue)
-	api.DELETE("/queues/{queue_name}", s.handleDeleteQueue)
-	api.GET("/queues/{queue_name}/stats", s.handleGetQueueStats)
+	api.GET("/queues/:queue_name", s.handleGetQueue)
+	api.PUT("/queues/:queue_name", s.handleUpdateQueue)
+	api.DELETE("/queues/:queue_name", s.handleDeleteQueue)
+	api.GET("/queues/:queue_name/stats", s.handleGetQueueStats)
 
 	// Worker routes
 	api.GET("/workers", s.handleListWorkers)
-	api.DELETE("/workers/{worker_id}", s.handleDeleteWorker)
+	api.DELETE("/workers/:worker_id", s.handleDeleteWorker)
 
 	// Provisioner routes
 	api.GET("/provisioners", s.handleListProvisioners)
