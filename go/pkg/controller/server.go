@@ -199,9 +199,10 @@ func (s *Server) Start() error {
 		Handler: s.workerServer.Handler(),
 	}
 
-	if s.config.ControllerSetting.WorkerAccessibleBaseUrl == "" {
-		s.config.ControllerSetting.WorkerAccessibleBaseUrl = fmt.Sprintf("http://127.0.0.1:%d", s.config.Server.Worker.Port)
+	if s.config.Server.Worker.AccessibleBaseUrl == "" {
+		s.config.Server.Worker.AccessibleBaseUrl = fmt.Sprintf("http://127.0.0.1:%d", s.config.Server.Worker.Port)
 	}
+	log.Printf("s.config.ControllerSetting.WorkerAccessibleBaseUrl : %s", s.config.Server.Worker.AccessibleBaseUrl)
 
 	// Start metrics collection goroutine
 	go s.startMetricsCollection()

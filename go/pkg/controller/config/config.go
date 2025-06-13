@@ -20,7 +20,6 @@ package config
 
 import (
 	"fmt"
-	"github.com/jc-lab/distworker/go/pkg/models"
 	"github.com/knadh/koanf/v2"
 	"gopkg.in/yaml.v3"
 	"time"
@@ -28,12 +27,11 @@ import (
 
 // Config represents the controller configuration
 type Config struct {
-	Server            ServerConfig             `koanf:"server"`
-	Database          DatabaseConfig           `koanf:"database"`
-	Storage           StorageConfig            `koanf:"storage"`
-	Queues            []QueueConfig            `koanf:"queues"`
-	Provisioner       ProvisionerConfig        `koanf:"provisioner"`
-	ControllerSetting models.ControllerSetting `koanf:"controller_setting"`
+	Server      ServerConfig      `koanf:"server"`
+	Database    DatabaseConfig    `koanf:"database"`
+	Storage     StorageConfig     `koanf:"storage"`
+	Queues      []QueueConfig     `koanf:"queues"`
+	Provisioner ProvisionerConfig `koanf:"provisioner"`
 
 	k *koanf.Koanf
 }

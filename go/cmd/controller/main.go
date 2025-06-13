@@ -49,8 +49,13 @@ func main() {
 	}
 
 	if err := k.Load(env.Provider("DISTWORKER_", ".", func(s string) string {
-		return strings.Replace(strings.ToLower(
-			strings.TrimPrefix(s, "DISTWORKER_")), "_", ".", -1)
+		name := strings.TrimPrefix(s, "DISTWORKER_")
+		key := config2.EnvNameToKey(name)
+		if key != "" {
+			return key
+		}
+		// envMapping
+		return strings.Replace(strings.ToLower(key), "_", ".", -1)
 	}), nil); err != nil {
 		log.Fatalf("Error loading config from env: %v", err)
 	}
