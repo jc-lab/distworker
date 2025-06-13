@@ -55,7 +55,7 @@ func main() {
 			return key
 		}
 		// envMapping
-		return strings.Replace(strings.ToLower(key), "_", ".", -1)
+		return strings.Replace(strings.ToLower(name), "_", ".", -1)
 	}), nil); err != nil {
 		log.Fatalf("Error loading config from env: %v", err)
 	}
